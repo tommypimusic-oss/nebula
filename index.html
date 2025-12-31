@@ -29,14 +29,13 @@
 
     <!-- 3. Application Logic -->
     <script type="text/babel" data-type="module">
-        // --- FIREBASE IMPORTS (FIXED) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp } 
         from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
-     const firebaseConfig = {
+const firebaseConfig = {
   apiKey: "AIzaSyBCBXsY55rxtKUx2HYXA7riczMRTiRKgMA",
   authDomain: "idea-nebula.firebaseapp.com",
   projectId: "idea-nebula",
@@ -46,7 +45,6 @@
   measurementId: "G-HGDDEJ8N20"
 };
 
-        // Initialize App & Auth
         let app, db, auth;
         try {
             app = initializeApp(firebaseConfig);
@@ -58,7 +56,18 @@
 
         const { useState, useEffect, useRef } = React;
 
-        // --- COLLIDER LOGIC ---
+        // --- UTILS ---
+        
+        // Better Pseudo-Random Hash: Ensures uniform distribution
+        // Takes a string (ID) and a seed (e.g. 'x' or 'y') to produce a number 0..1
+        const getSeededRandom = (str, axis) => {
+            let h = 0xdeadbeef;
+            str = str + axis; // Mix the axis into the hash
+            for(let i = 0; i < str.length; i++)
+                h = Math.imul(h ^ str.charCodeAt(i), 2654435761);
+            return ((h ^ h >>> 16) >>> 0) / 4294967296;
+        }
+
         const generateRemix = (texts) => {
             let pool = [];
             texts.forEach(text => {
@@ -108,7 +117,7 @@
             const [hoveredNode, setHoveredNode] = useState(null);
             const [selectedNode, setSelectedNode] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
-            const [user, setUser] = useState(null); // Auth state
+            const [user, setUser] = useState(null);
             
             const [showAddModal, setShowAddModal] = useState(false);
             const [showRemixModal, setShowRemixModal] = useState(false);
@@ -121,50 +130,52 @@
             const canvasRef = useRef(null);
             const requestRef = useRef();
 
-            // 1. AUTH & DATA SYNC
+            // 1. AUTH & DATA
             useEffect(() => {
                 if (!auth || !db) return;
 
-                // A. Sign In Anonymously
                 const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
-                    if (currentUser) {
-                        console.log("User Authenticated:", currentUser.uid);
-                        setUser(currentUser);
-                    } else {
-                        console.log("Signing in...");
-                        signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
-                    }
+                    if (currentUser) setUser(currentUser);
+                    else signInAnonymously(auth).catch(console.error);
                 });
 
-                // B. Listen to Database
                 const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
                 
                 const unsubData = onSnapshot(q, (snapshot) => {
                     const loadedIdeas = snapshot.docs.map(doc => {
                         const data = doc.data();
+                        
+                        // Use improved hash for X/Y
+                        const randX = getSeededRandom(doc.id, 'x');
+                        const randY = getSeededRandom(doc.id, 'y');
+                        
+                        // Add padding (10%) so stars don't hug the edge
+                        const padding = 0.1;
+                        const w = window.innerWidth;
+                        const h = window.innerHeight;
+
                         return {
                             id: doc.id,
                             content: data.content,
-                            // Deterministic random coords
-                            x: (Math.abs(doc.id.split('').reduce((a,b)=>a+b.charCodeAt(0),0)) % 1000) / 1000 * window.innerWidth,
-                            y: (Math.abs((doc.id+'y').split('').reduce((a,b)=>a+b.charCodeAt(0),0)) % 1000) / 1000 * window.innerHeight,
+                            // Map 0..1 to Padding..1-Padding
+                            x: (padding * w) + (randX * (w * (1 - padding * 2))),
+                            y: (padding * h) + (randY * (h * (1 - padding * 2))),
                             timestamp: data.timestamp,
                             glimmer: null
                         };
                     });
                     setIdeas(loadedIdeas);
-                }, (err) => console.error("Data Error:", err));
+                });
 
                 return () => { unsubAuth(); unsubData(); };
             }, []);
 
-            // 2. DRAW LOOP
+            // 2. DRAW
             const draw = () => {
                 const canvas = canvasRef.current;
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 
-                // Clear Black
                 ctx.fillStyle = '#000000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -259,10 +270,7 @@
 
             const handleAddIdea = async () => {
                 if (!newContent.trim() || !db) return;
-                
-                // Debugging
-                if (!user) { alert("Waiting for connection to the Collective... check your internet."); return; }
-
+                if (!user) { alert("Connecting... please wait."); return; }
                 setIsSubmitting(true);
                 try {
                     await addDoc(collection(db, "ideas"), {
@@ -272,10 +280,7 @@
                     });
                     setNewContent('');
                     setShowAddModal(false);
-                } catch (e) { 
-                    alert("Transmission failed. Check console for error details.");
-                    console.error("Write Error:", e);
-                } 
+                } catch (e) { alert("Transmission failed."); } 
                 finally { setIsSubmitting(false); }
             };
 
@@ -300,10 +305,7 @@
                             <h1 className="text-3xl font-light tracking-[0.2em] text-white opacity-90">IDEA NEBULA</h1>
                             <div className="text-xs mt-2 font-mono flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full ${user ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                {user ? 
-                                    <span className="text-green-500">CONNECTED • {ideas.length} NODES</span> : 
-                                    <span className="text-red-500">DISCONNECTED</span>
-                                }
+                                {user ? <span className="text-green-500">CONNECTED • {ideas.length} NODES</span> : <span className="text-red-500">DISCONNECTED</span>}
                             </div>
                         </div>
                         <div className="flex gap-3 pointer-events-auto">
