@@ -71,45 +71,80 @@ const firebaseConfig = {
             return ((h ^ h >>> 16) >>> 0) / 4294967296;
         }
 
-        // --- COLLIDER LOGIC ---
+        // --- COLLIDER LOGIC (STRICT CUT-UP) ---
         const generateRemix = (texts) => {
+            // 1. Structure pool with source tracking
             let pool = [];
-            texts.forEach(text => {
-                const lines = text.split(/[\n.]+/);
+            texts.forEach((text, index) => {
+                // Split by newline, period, exclamation, or question mark to break paragraphs
+                const lines = text.split(/[\n.!?]+/);
                 lines.forEach(line => {
                     const clean = line.trim();
-                    if (clean.length > 5) pool.push(clean);
+                    if (clean.length > 5) {
+                        pool.push({ text: clean, sourceId: index });
+                    }
                 });
             });
 
             if (pool.length === 0) return "The void is silent.";
+            
+            // Randomize
             pool.sort(() => Math.random() - 0.5);
 
             const output = [];
-            let currentLine = pool.shift();
-            output.push(currentLine);
+            const usedSourceIds = new Set(); // Track which stars have contributed
 
-            const targetLength = Math.floor(Math.random() * 5) + 3;
+            // 2. Pick Starter
+            const starter = pool.shift();
+            output.push(starter.text);
+            usedSourceIds.add(starter.sourceId);
 
-            while (output.length < targetLength && pool.length > 0) {
+            // 3. Chain Reaction
+            // We limit the poem length to the number of sources provided (1 line per star)
+            const maxLines = texts.length; 
+
+            while (output.length < maxLines && pool.length > 0) {
+                const currentLine = output[output.length - 1];
                 const currentWords = new Set(currentLine.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
-                let foundMatch = false;
+                
+                let foundMatchIndex = -1;
+
+                // Look for a link, BUT skip any lines from sources we already used
                 for (let i = 0; i < pool.length; i++) {
                     const candidate = pool[i];
-                    const candidateWords = new Set(candidate.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
+                    
+                    // CRITICAL: Ensure we haven't used this source yet
+                    if (usedSourceIds.has(candidate.sourceId)) continue;
+
+                    const candidateWords = new Set(candidate.text.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
                     const intersection = new Set([...currentWords].filter(x => candidateWords.has(x)));
+                    
                     if (intersection.size > 0) {
-                        currentLine = pool.splice(i, 1)[0];
-                        output.push(currentLine);
-                        foundMatch = true;
+                        foundMatchIndex = i;
                         break;
                     }
                 }
-                if (!foundMatch) {
-                    currentLine = pool.shift();
-                    output.push(currentLine);
+
+                if (foundMatchIndex !== -1) {
+                    // Found a thematic link from a new source
+                    const match = pool.splice(foundMatchIndex, 1)[0];
+                    output.push(match.text);
+                    usedSourceIds.add(match.sourceId);
+                } else {
+                    // No match found? Pick a random line from an unused source (Contrast)
+                    const nextRandomIndex = pool.findIndex(item => !usedSourceIds.has(item.sourceId));
+                    
+                    if (nextRandomIndex !== -1) {
+                        const randomJump = pool.splice(nextRandomIndex, 1)[0];
+                        output.push(randomJump.text);
+                        usedSourceIds.add(randomJump.sourceId);
+                    } else {
+                        // No unique sources left
+                        break;
+                    }
                 }
             }
+
             return output.join('\n');
         };
 
@@ -128,13 +163,13 @@ const firebaseConfig = {
             
             const [newContent, setNewContent] = useState('');
             const [isSubmitting, setIsSubmitting] = useState(false);
-            const [isColliding, setIsColliding] = useState(false); // Controls the button state
+            const [isColliding, setIsColliding] = useState(false);
 
             // Animation Refs
             const canvasRef = useRef(null);
             const requestRef = useRef();
-            const collisionProgress = useRef(0); // 0.0 to 1.0
-            const isAnimatingRef = useRef(false); // Controls the draw loop logic
+            const collisionProgress = useRef(0);
+            const isAnimatingRef = useRef(false);
 
             // 1. AUTH & DATA SYNC
             useEffect(() => {
@@ -177,23 +212,21 @@ const firebaseConfig = {
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 
-                // Update Collision Progress
+                // Animation Logic
                 if (isAnimatingRef.current && collisionProgress.current < 1.0) {
-                    collisionProgress.current += 0.008; // Adjust speed here (Lower = Slower)
+                    collisionProgress.current += 0.008; 
                     if (collisionProgress.current >= 1.0) {
                         collisionProgress.current = 1.0;
-                        // Animation complete, show modal
                         setShowRemixModal(true);
                         setIsColliding(false);
                         isAnimatingRef.current = false;
                     }
                 }
 
-                // Clear
                 ctx.fillStyle = '#000000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                // Glimmer Logic
+                // Glimmer
                 if (ideas.length > 0 && Math.random() < 0.1) {
                     const target = ideas[Math.floor(Math.random() * ideas.length)];
                     if (!target.glimmer) {
@@ -202,7 +235,7 @@ const firebaseConfig = {
                     }
                 }
 
-                // Draw Nodes
+                // Draw Stars
                 ideas.forEach(node => {
                     const matchesSearch = searchTerm && node.content.toLowerCase().includes(searchTerm.toLowerCase());
                     const isDimmed = searchTerm && !matchesSearch;
@@ -234,36 +267,23 @@ const firebaseConfig = {
                     ctx.shadowBlur = 0;
                 });
 
-                // --- ANIMATED CONSTELLATION ---
+                // Constellations
                 if (remixSources.length > 1) {
-                    // Filter nodes maintaining the remix selection order
-                    const nodes = remixSources
-                        .map(id => ideas.find(i => i.id === id))
-                        .filter(n => n);
-
+                    const nodes = remixSources.map(id => ideas.find(i => i.id === id)).filter(n => n);
                     if (nodes.length > 1) {
-                        // Close the loop by adding the start node to the end
                         const pathNodes = [...nodes, nodes[0]];
                         const totalSegments = pathNodes.length - 1;
-                        
-                        // Calculate total length to draw based on progress
-                        // currentT (0 to totalSegments)
                         const currentT = collisionProgress.current * totalSegments;
                         
                         ctx.beginPath();
                         ctx.strokeStyle = '#facc15';
-                        ctx.lineWidth = 1; // Slightly thicker
+                        ctx.lineWidth = 1;
                         ctx.globalAlpha = 0.8;
-                        
                         ctx.moveTo(pathNodes[0].x, pathNodes[0].y);
 
-                        // Draw completed segments
                         const drawnSegments = Math.floor(currentT);
-                        for (let i = 0; i < drawnSegments; i++) {
-                            ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
-                        }
+                        for (let i = 0; i < drawnSegments; i++) ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
 
-                        // Draw partial current segment
                         if (drawnSegments < totalSegments) {
                             const segmentProgress = currentT - drawnSegments;
                             const start = pathNodes[drawnSegments];
@@ -272,26 +292,23 @@ const firebaseConfig = {
                             const curY = start.y + (end.y - start.y) * segmentProgress;
                             ctx.lineTo(curX, curY);
 
-                            // Draw the "Spark" head
+                            // Spark
                             ctx.shadowBlur = 20;
                             ctx.shadowColor = '#ffffff';
                             ctx.fillStyle = '#ffffff';
-                            ctx.beginPath();
-                            ctx.arc(curX, curY, 4, 0, Math.PI * 2);
-                            ctx.fill();
-                            // Reset context for next frame line drawing
+                            ctx.beginPath(); ctx.arc(curX, curY, 4, 0, Math.PI * 2); ctx.fill();
                             ctx.shadowBlur = 0;
-                            ctx.beginPath(); // Start new path for the line continuation logic (hacky but works for stroke)
+                            
+                            // Redraw path for stroke continuity
+                            ctx.beginPath();
                             ctx.moveTo(pathNodes[0].x, pathNodes[0].y);
                             for (let i = 0; i < drawnSegments; i++) ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
                             ctx.lineTo(curX, curY);
                         }
-
                         ctx.stroke();
                         ctx.globalAlpha = 1.0;
                     }
                 }
-
                 requestRef.current = requestAnimationFrame(draw);
             };
 
@@ -306,7 +323,7 @@ const firebaseConfig = {
                 handleResize();
                 requestRef.current = requestAnimationFrame(draw);
                 return () => cancelAnimationFrame(requestRef.current);
-            }, [ideas, hoveredNode, selectedNode, searchTerm, remixSources]); // Re-bind when state changes
+            }, [ideas, hoveredNode, selectedNode, searchTerm, remixSources]);
 
             // 3. HANDLERS
             const handleMouseMove = (e) => {
@@ -351,31 +368,27 @@ const firebaseConfig = {
 
             const handleRemix = () => {
                 if (ideas.length < 3) { alert("Not enough data in the void yet."); return; }
-                if (isColliding) return; // Prevent double click
+                if (isColliding) return;
 
                 setIsColliding(true);
-                
-                // Pick 3-5 random ideas
-                const count = Math.floor(Math.random() * 3) + 3;
+                // Increased to 4-6 random ideas for richer results
+                const count = Math.floor(Math.random() * 3) + 4; 
                 const shuffled = [...ideas].sort(() => 0.5 - Math.random());
                 const selected = shuffled.slice(0, count);
                 
                 const result = generateRemix(selected.map(i => i.content));
                 
                 setRemixResult(result);
-                setRemixSources(selected.map(i => i.id)); // This triggers yellow highlights
+                setRemixSources(selected.map(i => i.id));
                 
-                // START ANIMATION
                 collisionProgress.current = 0;
                 isAnimatingRef.current = true;
-                // Modal will open when animation finishes in draw loop
             };
 
             const closeRemix = () => {
                 setShowRemixModal(false);
-                // Keep highlights, but stop animation flag
                 isAnimatingRef.current = false; 
-                collisionProgress.current = 1.0; // Draw full lines
+                collisionProgress.current = 1.0;
             }
 
             return (
