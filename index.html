@@ -37,7 +37,7 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp } 
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp, where, getDocs, startAt } 
         from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
@@ -62,22 +62,31 @@ const firebaseConfig = {
 
         const { useState, useEffect, useRef } = React;
 
-        // --- UTILS ---
-        const getSeededRandom = (str, axis) => {
-            let h = 0xdeadbeef;
-            str = str + axis; 
-            for(let i = 0; i < str.length; i++)
-                h = Math.imul(h ^ str.charCodeAt(i), 2654435761);
-            return ((h ^ h >>> 16) >>> 0) / 4294967296;
+        // --- UTILS (IMPROVED RANDOMNESS) ---
+        // FNV-1a Hash implementation for better distribution
+        const fnv1aHash = (str, seed) => {
+            let h = 0x811c9dc5 ^ seed;
+            for (let i = 0; i < str.length; i++) {
+                h ^= str.charCodeAt(i);
+                h = Math.imul(h, 0x01000193);
+            }
+            return (h >>> 0) / 4294967296;
+        };
+
+        const generateAutoId = () => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let autoId = '';
+            for (let i = 0; i < 20; i++) {
+                autoId += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return autoId;
         }
 
-        // --- COLLIDER LOGIC (STRICT CUT-UP) ---
+        // --- COLLIDER LOGIC (STRICT CUT-UP V2) ---
         const generateRemix = (texts) => {
-            // 1. Structure pool with source tracking
             let pool = [];
             texts.forEach((text, index) => {
-                // Split by newline, period, exclamation, or question mark to break paragraphs
-                const lines = text.split(/[\n.!?]+/);
+                const lines = text.split(/[\r\n.!?]+/);
                 lines.forEach(line => {
                     const clean = line.trim();
                     if (clean.length > 5) {
@@ -87,38 +96,29 @@ const firebaseConfig = {
             });
 
             if (pool.length === 0) return "The void is silent.";
-            
-            // Randomize
             pool.sort(() => Math.random() - 0.5);
 
             const output = [];
-            const usedSourceIds = new Set(); // Track which stars have contributed
-
-            // 2. Pick Starter
+            const usedSourceIds = new Set();
             const starter = pool.shift();
-            output.push(starter.text);
-            usedSourceIds.add(starter.sourceId);
+            
+            if (starter) {
+                output.push(starter.text);
+                usedSourceIds.add(starter.sourceId);
+            }
 
-            // 3. Chain Reaction
-            // We limit the poem length to the number of sources provided (1 line per star)
             const maxLines = texts.length; 
 
             while (output.length < maxLines && pool.length > 0) {
                 const currentLine = output[output.length - 1];
                 const currentWords = new Set(currentLine.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
-                
                 let foundMatchIndex = -1;
 
-                // Look for a link, BUT skip any lines from sources we already used
                 for (let i = 0; i < pool.length; i++) {
                     const candidate = pool[i];
-                    
-                    // CRITICAL: Ensure we haven't used this source yet
                     if (usedSourceIds.has(candidate.sourceId)) continue;
-
                     const candidateWords = new Set(candidate.text.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
                     const intersection = new Set([...currentWords].filter(x => candidateWords.has(x)));
-                    
                     if (intersection.size > 0) {
                         foundMatchIndex = i;
                         break;
@@ -126,25 +126,20 @@ const firebaseConfig = {
                 }
 
                 if (foundMatchIndex !== -1) {
-                    // Found a thematic link from a new source
                     const match = pool.splice(foundMatchIndex, 1)[0];
                     output.push(match.text);
                     usedSourceIds.add(match.sourceId);
                 } else {
-                    // No match found? Pick a random line from an unused source (Contrast)
                     const nextRandomIndex = pool.findIndex(item => !usedSourceIds.has(item.sourceId));
-                    
                     if (nextRandomIndex !== -1) {
                         const randomJump = pool.splice(nextRandomIndex, 1)[0];
                         output.push(randomJump.text);
                         usedSourceIds.add(randomJump.sourceId);
                     } else {
-                        // No unique sources left
                         break;
                     }
                 }
             }
-
             return output.join('\n');
         };
 
@@ -185,20 +180,7 @@ const firebaseConfig = {
                 const unsubData = onSnapshot(q, (snapshot) => {
                     const loadedIdeas = snapshot.docs.map(doc => {
                         const data = doc.data();
-                        const randX = getSeededRandom(doc.id, 'x');
-                        const randY = getSeededRandom(doc.id, 'y');
-                        const padding = 0.1; 
-                        const w = window.innerWidth;
-                        const h = window.innerHeight;
-
-                        return {
-                            id: doc.id,
-                            content: data.content,
-                            x: (padding * w) + (randX * (w * (1 - padding * 2))),
-                            y: (padding * h) + (randY * (h * (1 - padding * 2))),
-                            timestamp: data.timestamp,
-                            glimmer: null
-                        };
+                        return mapDocToNode(doc.id, data);
                     });
                     setIdeas(loadedIdeas);
                 });
@@ -206,13 +188,31 @@ const firebaseConfig = {
                 return () => { unsubAuth(); unsubData(); };
             }, []);
 
+            // Helper to format nodes with chaotic distribution
+            const mapDocToNode = (id, data) => {
+                // Seed 1 for X, Seed 2 for Y. Large primes ensure they don't correlate.
+                const randX = fnv1aHash(id, 0x811c9dc5);
+                const randY = fnv1aHash(id, 0x1000193); 
+                
+                const padding = 0.1; 
+                const w = window.innerWidth;
+                const h = window.innerHeight;
+                return {
+                    id: id,
+                    content: data.content,
+                    x: (padding * w) + (randX * (w * (1 - padding * 2))),
+                    y: (padding * h) + (randY * (h * (1 - padding * 2))),
+                    timestamp: data.timestamp,
+                    glimmer: null
+                };
+            };
+
             // 2. DRAW LOOP
             const draw = () => {
                 const canvas = canvasRef.current;
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 
-                // Animation Logic
                 if (isAnimatingRef.current && collisionProgress.current < 1.0) {
                     collisionProgress.current += 0.008; 
                     if (collisionProgress.current >= 1.0) {
@@ -226,7 +226,6 @@ const firebaseConfig = {
                 ctx.fillStyle = '#000000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                // Glimmer
                 if (ideas.length > 0 && Math.random() < 0.1) {
                     const target = ideas[Math.floor(Math.random() * ideas.length)];
                     if (!target.glimmer) {
@@ -235,7 +234,6 @@ const firebaseConfig = {
                     }
                 }
 
-                // Draw Stars
                 ideas.forEach(node => {
                     const matchesSearch = searchTerm && node.content.toLowerCase().includes(searchTerm.toLowerCase());
                     const isDimmed = searchTerm && !matchesSearch;
@@ -267,7 +265,6 @@ const firebaseConfig = {
                     ctx.shadowBlur = 0;
                 });
 
-                // Constellations
                 if (remixSources.length > 1) {
                     const nodes = remixSources.map(id => ideas.find(i => i.id === id)).filter(n => n);
                     if (nodes.length > 1) {
@@ -292,14 +289,12 @@ const firebaseConfig = {
                             const curY = start.y + (end.y - start.y) * segmentProgress;
                             ctx.lineTo(curX, curY);
 
-                            // Spark
                             ctx.shadowBlur = 20;
                             ctx.shadowColor = '#ffffff';
                             ctx.fillStyle = '#ffffff';
                             ctx.beginPath(); ctx.arc(curX, curY, 4, 0, Math.PI * 2); ctx.fill();
                             ctx.shadowBlur = 0;
                             
-                            // Redraw path for stroke continuity
                             ctx.beginPath();
                             ctx.moveTo(pathNodes[0].x, pathNodes[0].y);
                             for (let i = 0; i < drawnSegments; i++) ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
@@ -366,20 +361,64 @@ const firebaseConfig = {
                 finally { setIsSubmitting(false); }
             };
 
-            const handleRemix = () => {
+            const handleRemix = async () => {
                 if (ideas.length < 3) { alert("Not enough data in the void yet."); return; }
                 if (isColliding) return;
 
                 setIsColliding(true);
-                // Increased to 4-6 random ideas for richer results
-                const count = Math.floor(Math.random() * 3) + 4; 
-                const shuffled = [...ideas].sort(() => 0.5 - Math.random());
-                const selected = shuffled.slice(0, count);
                 
-                const result = generateRemix(selected.map(i => i.content));
+                const count = Math.floor(Math.random() * 2) + 4;
+                let randomDocs = [];
+                
+                try {
+                    for(let i = 0; i < count; i++) {
+                        const randId = generateAutoId();
+                        const q = query(collection(db, "ideas"), orderBy("__name__"), startAt(randId), limit(1));
+                        const snapshot = await getDocs(q);
+                        
+                        if (!snapshot.empty) {
+                            const doc = snapshot.docs[0];
+                            randomDocs.push(mapDocToNode(doc.id, doc.data()));
+                        } else {
+                            const qWrap = query(collection(db, "ideas"), limit(1));
+                            const snapWrap = await getDocs(qWrap);
+                            if (!snapWrap.empty) {
+                                const doc = snapWrap.docs[0];
+                                randomDocs.push(mapDocToNode(doc.id, doc.data()));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("Deep Dive Error:", e);
+                    setIsColliding(false);
+                    return;
+                }
+
+                const uniqueDocsMap = new Map();
+                randomDocs.forEach(doc => uniqueDocsMap.set(doc.id, doc));
+                if (uniqueDocsMap.size < count) {
+                    const visibleShuffled = [...ideas].sort(() => 0.5 - Math.random());
+                    for (const node of visibleShuffled) {
+                        if (uniqueDocsMap.size >= count) break;
+                        uniqueDocsMap.set(node.id, node);
+                    }
+                }
+                const finalSelection = Array.from(uniqueDocsMap.values());
+
+                setIdeas(prev => {
+                    const newSet = [...prev];
+                    finalSelection.forEach(newNode => {
+                        if (!newSet.find(n => n.id === newNode.id)) {
+                            newSet.push(newNode);
+                        }
+                    });
+                    return newSet;
+                });
+
+                const result = generateRemix(finalSelection.map(i => i.content));
                 
                 setRemixResult(result);
-                setRemixSources(selected.map(i => i.id));
+                setRemixSources(finalSelection.map(i => i.id));
                 
                 collisionProgress.current = 0;
                 isAnimatingRef.current = true;
@@ -429,7 +468,7 @@ const firebaseConfig = {
                         >
                             <i className={`ph ph-shuffle text-lg md:text-xl text-yellow-500 ${isColliding ? 'animate-spin' : 'group-hover:animate-spin'}`}></i>
                             <span className="font-bold tracking-wide text-sm md:text-base group-hover:text-yellow-500 transition-colors">
-                                {isColliding ? 'CONNECTING...' : 'COLLIDE'}
+                                {isColliding ? 'DIVING DEEP...' : 'COLLIDE'}
                             </span>
                         </button>
                     </div>
