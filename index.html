@@ -51,6 +51,16 @@
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
+      
+      /* New animations */
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-5px); }
+      }
+      
+      .float-animation {
+        animation: float 3s ease-in-out infinite;
+      }
     </style>
 
     <!-- 2. React & Babel -->
@@ -111,50 +121,28 @@
 
         // --- COLLIDER LOGIC (PURE RANDOM LINES) ---
         const generateRemix = (texts) => {
-  const output = [];
-  
-  texts.forEach(text => {
-    // Split by multiple delimiters for better line detection
-    const lines = text.split(/[\r\n.!?]+/);
-    
-    // Filter out short noise but keep moderate fragments
-    const validLines = lines
-      .map(line => line.trim())
-      .filter(line => line.length > 3); // Lowered from 5 to 3 for more fragments
-    
-    if (validLines.length > 0) {
-      // WEIGHTED selection: Longer lines slightly more likely
-      // But still random
-      const weights = validLines.map(line => Math.sqrt(line.length));
-      const totalWeight = weights.reduce((a, b) => a + b, 0);
-      
-      let random = Math.random() * totalWeight;
-      let selectedLine = validLines[0]; // fallback
-      
-      for (let i = 0; i < validLines.length; i++) {
-        random -= weights[i];
-        if (random <= 0) {
-          selectedLine = validLines[i];
-          break;
-        }
-      }
-      
-      output.push(selectedLine);
-    }
-  });
+            const output = [];
+            
+            texts.forEach(text => {
+                // Split by newline, period, exclamation, or question mark
+                const lines = text.split(/[\r\n.!?]+/);
+                
+                // Filter out short noise
+                const validLines = lines
+                    .map(line => line.trim())
+                    .filter(line => line.length > 5);
+                
+                if (validLines.length > 0) {
+                    // Pick exactly one random line from this note
+                    const randomLine = validLines[Math.floor(Math.random() * validLines.length)];
+                    output.push(randomLine);
+                }
+            });
 
-  if (output.length === 0) return "The void is silent.";
-  
-  // Occasionally shuffle the order of lines for more variety
-  if (Math.random() < 0.3) {
-    for (let i = output.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [output[i], output[j]] = [output[j], output[i]];
-    }
-  }
-  
-  return output.join('\n');
-};
+            if (output.length === 0) return "The void is silent.";
+            
+            return output.join('\n');
+        };
 
         // --- MAIN COMPONENT ---
         function IdeaNebula() {
@@ -185,26 +173,24 @@
             const [favoritesSearch, setFavoritesSearch] = useState('');
             const [starAnimation, setStarAnimation] = useState(null);
 
+            // NEW: Collision memory to avoid recent repeats
+            const [recentCollisions, setRecentCollisions] = useState(() => {
+                const saved = localStorage.getItem('nebulaRecentCollisions');
+                return saved ? JSON.parse(saved) : [];
+            });
+            
+            // NEW: Surprise mode for extra randomness
+            const [surpriseMode, setSurpriseMode] = useState(false);
+
             // Backup favorites to localStorage
             useEffect(() => {
                 localStorage.setItem('nebulaFavorites', JSON.stringify(favorites));
             }, [favorites]);
 
-            // Auto-backup feature
+            // Save recent collisions
             useEffect(() => {
-                const backupInterval = setInterval(() => {
-                    if (favorites.length > 0) {
-                        const backup = {
-                            timestamp: new Date().toISOString(),
-                            count: favorites.length,
-                            data: favorites
-                        };
-                        localStorage.setItem('nebulaFavorites_backup', JSON.stringify(backup));
-                    }
-                }, 3600000); // 1 hour
-                
-                return () => clearInterval(backupInterval);
-            }, [favorites]);
+                localStorage.setItem('nebulaRecentCollisions', JSON.stringify(recentCollisions.slice(-50)));
+            }, [recentCollisions]);
 
             const toggleFavorite = (text, type = 'collision', metadata = {}) => {
                 if (!text) return;
@@ -294,7 +280,7 @@
                     else signInAnonymously(auth).catch(console.error);
                 });
 
-                const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
+                const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(500));
                 
                 const unsubData = onSnapshot(q, (snapshot) => {
                     const loadedIdeas = snapshot.docs.map(doc => {
@@ -371,6 +357,16 @@
                         color = node.glimmer.color; radius = 3; glow = 10;
                         node.glimmer.life -= 0.02;
                         if (node.glimmer.life <= 0) node.glimmer = null;
+                    }
+
+                    // NEW: Highlight notes that haven't been used recently
+                    const lastUsed = recentCollisions.find(rc => rc.ids.includes(node.id));
+                    if (lastUsed) {
+                        const daysSince = (Date.now() - lastUsed.timestamp) / (1000 * 60 * 60 * 24);
+                        if (daysSince > 7) { // Haven't been used in over a week
+                            radius = 2.5;
+                            color = '#60a5fa'; // Blue tint
+                        }
                     }
 
                     ctx.beginPath();
@@ -478,41 +474,96 @@
                 finally { setIsSubmitting(false); }
             };
 
-   const handleRemix = async () => {
-  if (ideas.length < 3) { 
-    alert("Not enough data in the void yet."); 
-    return; 
-  }
-  if (isColliding) return;
+            // NEW: IMPROVED RANDOM SELECTION
+            const handleRemix = async () => {
+                if (ideas.length < 3) { 
+                    alert("Not enough data in the void yet."); 
+                    return; 
+                }
+                if (isColliding) return;
 
-  setIsColliding(true);
-  
-  // SIMPLE: Just pick random notes from the already-loaded ideas
-  const count = Math.floor(Math.random() * 2) + 4;
-  
-  // Create array of indices [0, 1, 2, ... ideas.length-1]
-  const indices = Array.from({length: ideas.length}, (_, i) => i);
-  
-  // Shuffle indices using Fisher-Yates
-  for (let i = indices.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [indices[i], indices[j]] = [indices[j], indices[i]];
-  }
-  
-  // Pick first 'count' indices
-  const selectedIndices = indices.slice(0, count);
-  const selected = selectedIndices.map(idx => ideas[idx]);
-  
-  // Generate remix
-  const result = generateRemix(selected.map(i => i.content));
-  
-  setRemixResult(result);
-  setRemixSources(selected.map(i => i.id));
-  
-  // Start animation
-  collisionProgress.current = 0;
-  isAnimatingRef.current = true;
-};
+                setIsColliding(true);
+                
+                // Get random number of notes (3-6, sometimes more in surprise mode)
+                let count;
+                if (surpriseMode) {
+                    count = Math.floor(Math.random() * 8) + 3; // 3-10 in surprise mode
+                } else {
+                    count = Math.floor(Math.random() * 3) + 4; // 4-6 normal mode
+                }
+                
+                // Create a copy of ideas and shuffle properly
+                const shuffled = [...ideas];
+                
+                // Fisher-Yates shuffle for true randomness
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                
+                // NEW: Weight against recently used notes
+                const weightedShuffled = shuffled.map(idea => {
+                    const lastUsed = recentCollisions.find(rc => rc.ids.includes(idea.id));
+                    let weight = 1.0;
+                    
+                    if (lastUsed) {
+                        const hoursSince = (Date.now() - lastUsed.timestamp) / (1000 * 60 * 60);
+                        // Notes used in last hour get lower weight
+                        if (hoursSince < 1) weight = 0.1;
+                        // Notes used in last day get moderate weight
+                        else if (hoursSince < 24) weight = 0.5;
+                        // Notes not used in over a week get bonus weight
+                        else if (hoursSince > 168) weight = 2.0;
+                    }
+                    
+                    return { idea, weight };
+                });
+                
+                // Select using weighted randomness
+                const selected = [];
+                const candidates = [...weightedShuffled];
+                
+                for (let i = 0; i < count && candidates.length > 0; i++) {
+                    const totalWeight = candidates.reduce((sum, item) => sum + item.weight, 0);
+                    let random = Math.random() * totalWeight;
+                    
+                    for (let j = 0; j < candidates.length; j++) {
+                        random -= candidates[j].weight;
+                        if (random <= 0) {
+                            selected.push(candidates[j].idea);
+                            candidates.splice(j, 1);
+                            break;
+                        }
+                    }
+                }
+                
+                // Fallback if weighted selection didn't work
+                if (selected.length < count) {
+                    const needed = count - selected.length;
+                    const remaining = shuffled.filter(idea => !selected.includes(idea));
+                    selected.push(...remaining.slice(0, needed));
+                }
+                
+                // NEW: Record this collision for memory
+                const collisionRecord = {
+                    timestamp: Date.now(),
+                    ids: selected.map(n => n.id),
+                    surpriseMode: surpriseMode
+                };
+                
+                setRecentCollisions(prev => [collisionRecord, ...prev.slice(0, 49)]);
+                
+                // Generate remix
+                const result = generateRemix(selected.map(i => i.content));
+                
+                setRemixResult(result);
+                setRemixSources(selected.map(i => i.id));
+                
+                // Start animation
+                collisionProgress.current = 0;
+                isAnimatingRef.current = true;
+            };
+
             const closeRemix = () => {
                 setShowRemixModal(false);
                 isAnimatingRef.current = false; 
@@ -535,6 +586,11 @@
                             <div className="text-[10px] md:text-xs text-zinc-500 mt-1 font-mono flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full ${user ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
                                 {user ? <span className="text-green-500">CONNECTED • {ideas.length}</span> : "OFFLINE"}
+                                {surpriseMode && (
+                                    <span className="text-yellow-500 ml-2 flex items-center gap-1">
+                                        <i className="ph ph-lightning"></i> SURPRISE MODE
+                                    </span>
+                                )}
                             </div>
                         </div>
                         <div className="flex gap-2 pointer-events-auto w-full md:w-auto">
@@ -543,8 +599,17 @@
                                 <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500" />
                             </div>
                             
+                            {/* Surprise Mode Toggle */}
+                            <button 
+                                onClick={() => setSurpriseMode(!surpriseMode)}
+                                className={`${surpriseMode ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400'} w-10 h-10 rounded-full shadow-lg transition-all hover:scale-105 flex items-center justify-center shrink-0`}
+                                title={surpriseMode ? "Surprise mode ON - Extra random collisions" : "Turn on surprise mode for extra randomness"}
+                            >
+                                <i className="ph ph-lightning text-lg font-bold"></i>
+                            </button>
+                            
                             {/* Favorites Button */}
-                            <button onClick={() => setShowFavorites(true)} className="bg-zinc-100 hover:bg-white text-black w-10 h-10 md:w-auto md:px-4 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center justify-center shrink-0">
+                            <button onClick={() => setShowFavorites(true)} className="bg-zinc-100 hover:bg-white text-black w-10 h-10 md:w-auto md:px-4 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center justify-center shrink-0 relative">
                                 <i className="ph ph-star text-lg font-bold"></i>
                                 {favorites.length > 0 && (
                                     <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">
@@ -565,13 +630,18 @@
                         <button 
                             onClick={handleRemix} 
                             disabled={isColliding}
-                            className={`group flex items-center gap-2 bg-zinc-900/90 backdrop-blur border border-zinc-700 hover:border-yellow-500 text-white px-6 py-3 md:px-8 md:py-3 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 ${isColliding ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            className={`group flex items-center gap-2 ${surpriseMode ? 'bg-yellow-500/20 border-yellow-500' : 'bg-zinc-900/90 border-zinc-700'} backdrop-blur border text-white px-6 py-3 md:px-8 md:py-3 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 ${isColliding ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
-                            <i className={`ph ph-shuffle text-lg md:text-xl text-yellow-500 ${isColliding ? 'animate-spin' : 'group-hover:animate-spin'}`}></i>
+                            <i className={`ph ph-shuffle text-lg md:text-xl ${surpriseMode ? 'text-yellow-500 animate-spin' : 'text-yellow-500'} ${isColliding ? 'animate-spin' : 'group-hover:animate-spin'}`}></i>
                             <span className="font-bold tracking-wide text-sm md:text-base group-hover:text-yellow-500 transition-colors">
-                                {isColliding ? 'DIVING DEEP...' : 'COLLIDE'}
+                                {isColliding ? 'DIVING DEEP...' : surpriseMode ? 'CHAOS COLLIDE' : 'COLLIDE'}
                             </span>
                         </button>
+                        {surpriseMode && (
+                            <div className="text-center text-xs text-yellow-500/70 mt-2 animate-pulse">
+                                Extra random • More notes • Wild combinations
+                            </div>
+                        )}
                     </div>
 
                     {/* ADD MODAL */}
@@ -596,18 +666,27 @@
                             <div className="bg-zinc-900 border border-zinc-800 p-6 md:p-8 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] fade-in">
                                 <button onClick={closeRemix} className="absolute top-4 right-4 text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
                                 <div className="text-center mb-6">
-                                    <div className="inline-block px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-[10px] md:text-xs font-bold tracking-widest mb-2">COLLISION DETECTED</div>
+                                    <div className="inline-block px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-[10px] md:text-xs font-bold tracking-widest mb-2">
+                                        {surpriseMode ? 'CHAOTIC COLLISION' : 'COLLISION DETECTED'}
+                                    </div>
                                 </div>
                                 <div className="flex-grow overflow-y-auto custom-scroll bg-black/50 p-6 rounded-xl border border-zinc-800/50 mb-6 relative group">
                                     <p className="text-base md:text-xl text-zinc-100 font-serif leading-loose whitespace-pre-wrap text-center select-text cursor-text">{remixResult}</p>
                                     <button 
-                                        onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix' })} 
+                                        onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix', surpriseMode })} 
                                         className={`absolute top-2 right-2 transition-all ${starAnimation === remixResult ? 'star-burst' : ''}`}
                                     >
                                         <i className={`ph-fill ph-heart text-xl ${isFav(remixResult) ? 'text-red-500 pulse-fav' : 'text-zinc-500 hover:text-red-500'}`}></i>
                                     </button>
                                 </div>
-                                <div className="flex justify-center">
+                                <div className="flex justify-between items-center">
+                                    <button 
+                                        onClick={() => setSurpriseMode(!surpriseMode)}
+                                        className={`text-sm ${surpriseMode ? 'text-yellow-500' : 'text-zinc-400 hover:text-white'} transition-colors flex items-center gap-1`}
+                                    >
+                                        <i className="ph ph-lightning"></i>
+                                        {surpriseMode ? 'Normal Mode' : 'Surprise Mode'}
+                                    </button>
                                     <button onClick={handleRemix} className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors">
                                         <i className="ph ph-shuffle"></i> Reroll
                                     </button>
