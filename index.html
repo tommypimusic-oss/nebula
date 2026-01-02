@@ -111,24 +111,50 @@
 
         // --- COLLIDER LOGIC (PURE RANDOM LINES) ---
         const generateRemix = (texts) => {
-            const output = [];
-            
-            texts.forEach(text => {
-                const lines = text.split(/[\r\n.!?]+/);
-                const validLines = lines
-                    .map(line => line.trim())
-                    .filter(line => line.length > 5);
-                
-                if (validLines.length > 0) {
-                    const randomLine = validLines[Math.floor(Math.random() * validLines.length)];
-                    output.push(randomLine);
-                }
-            });
+  const output = [];
+  
+  texts.forEach(text => {
+    // Split by multiple delimiters for better line detection
+    const lines = text.split(/[\r\n.!?]+/);
+    
+    // Filter out short noise but keep moderate fragments
+    const validLines = lines
+      .map(line => line.trim())
+      .filter(line => line.length > 3); // Lowered from 5 to 3 for more fragments
+    
+    if (validLines.length > 0) {
+      // WEIGHTED selection: Longer lines slightly more likely
+      // But still random
+      const weights = validLines.map(line => Math.sqrt(line.length));
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      
+      let random = Math.random() * totalWeight;
+      let selectedLine = validLines[0]; // fallback
+      
+      for (let i = 0; i < validLines.length; i++) {
+        random -= weights[i];
+        if (random <= 0) {
+          selectedLine = validLines[i];
+          break;
+        }
+      }
+      
+      output.push(selectedLine);
+    }
+  });
 
-            if (output.length === 0) return "The void is silent.";
-            
-            return output.join('\n');
-        };
+  if (output.length === 0) return "The void is silent.";
+  
+  // Occasionally shuffle the order of lines for more variety
+  if (Math.random() < 0.3) {
+    for (let i = output.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [output[i], output[j]] = [output[j], output[i]];
+    }
+  }
+  
+  return output.join('\n');
+};
 
         // --- MAIN COMPONENT ---
         function IdeaNebula() {
@@ -452,69 +478,41 @@
                 finally { setIsSubmitting(false); }
             };
 
-            const handleRemix = async () => {
-                if (ideas.length < 3) { alert("Not enough data in the void yet."); return; }
-                if (isColliding) return;
+   const handleRemix = async () => {
+  if (ideas.length < 3) { 
+    alert("Not enough data in the void yet."); 
+    return; 
+  }
+  if (isColliding) return;
 
-                setIsColliding(true);
-                
-                const count = Math.floor(Math.random() * 2) + 4;
-                let randomDocs = [];
-                
-                try {
-                    for(let i = 0; i < count; i++) {
-                        const randId = generateAutoId();
-                        const q = query(collection(db, "ideas"), orderBy("__name__"), startAt(randId), limit(1));
-                        const snapshot = await getDocs(q);
-                        
-                        if (!snapshot.empty) {
-                            const doc = snapshot.docs[0];
-                            randomDocs.push(mapDocToNode(doc.id, doc.data()));
-                        } else {
-                            const qWrap = query(collection(db, "ideas"), limit(1));
-                            const snapWrap = await getDocs(qWrap);
-                            if (!snapWrap.empty) {
-                                const doc = snapWrap.docs[0];
-                                randomDocs.push(mapDocToNode(doc.id, doc.data()));
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error("Deep Dive Error:", e);
-                    setIsColliding(false);
-                    return;
-                }
-
-                const uniqueDocsMap = new Map();
-                randomDocs.forEach(doc => uniqueDocsMap.set(doc.id, doc));
-                if (uniqueDocsMap.size < count) {
-                    const visibleShuffled = [...ideas].sort(() => 0.5 - Math.random());
-                    for (const node of visibleShuffled) {
-                        if (uniqueDocsMap.size >= count) break;
-                        uniqueDocsMap.set(node.id, node);
-                    }
-                }
-                const finalSelection = Array.from(uniqueDocsMap.values());
-
-                setIdeas(prev => {
-                    const newSet = [...prev];
-                    finalSelection.forEach(newNode => {
-                        if (!newSet.find(n => n.id === newNode.id)) {
-                            newSet.push(newNode);
-                        }
-                    });
-                    return newSet;
-                });
-
-                const result = generateRemix(finalSelection.map(i => i.content));
-                
-                setRemixResult(result);
-                setRemixSources(finalSelection.map(i => i.id));
-                
-                collisionProgress.current = 0;
-                isAnimatingRef.current = true;
-            };
-
+  setIsColliding(true);
+  
+  // SIMPLE: Just pick random notes from the already-loaded ideas
+  const count = Math.floor(Math.random() * 2) + 4;
+  
+  // Create array of indices [0, 1, 2, ... ideas.length-1]
+  const indices = Array.from({length: ideas.length}, (_, i) => i);
+  
+  // Shuffle indices using Fisher-Yates
+  for (let i = indices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  
+  // Pick first 'count' indices
+  const selectedIndices = indices.slice(0, count);
+  const selected = selectedIndices.map(idx => ideas[idx]);
+  
+  // Generate remix
+  const result = generateRemix(selected.map(i => i.content));
+  
+  setRemixResult(result);
+  setRemixSources(selected.map(i => i.id));
+  
+  // Start animation
+  collisionProgress.current = 0;
+  isAnimatingRef.current = true;
+};
             const closeRemix = () => {
                 setShowRemixModal(false);
                 isAnimatingRef.current = false; 
