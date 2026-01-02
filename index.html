@@ -23,6 +23,34 @@
       
       .fade-in { animation: fadeIn 0.5s ease-out; }
       @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+      
+      /* Favorite animations */
+      .star-burst {
+        animation: starBurst 0.6s ease-out forwards;
+      }
+      
+      @keyframes starBurst {
+        0% { transform: scale(0.5); opacity: 0; }
+        50% { transform: scale(1.2); opacity: 1; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      
+      .pulse-fav {
+        animation: pulseFav 1s ease-in-out;
+      }
+      
+      @keyframes pulseFav {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.1); }
+        100% { transform: scale(1); }
+      }
+      
+      .line-clamp-3 {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
     </style>
 
     <!-- 2. React & Babel -->
@@ -41,15 +69,15 @@
         from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
-const firebaseConfig = {
-  apiKey: "AIzaSyBCBXsY55rxtKUx2HYXA7riczMRTiRKgMA",
-  authDomain: "idea-nebula.firebaseapp.com",
-  projectId: "idea-nebula",
-  storageBucket: "idea-nebula.firebasestorage.app",
-  messagingSenderId: "606687457668",
-  appId: "1:606687457668:web:cdca14efacc9516b2aedd1",
-  measurementId: "G-HGDDEJ8N20"
-};
+        const firebaseConfig = {
+          apiKey: "AIzaSyBCBXsY55rxtKUx2HYXA7riczMRTiRKgMA",
+          authDomain: "idea-nebula.firebaseapp.com",
+          projectId: "idea-nebula",
+          storageBucket: "idea-nebula.firebasestorage.app",
+          messagingSenderId: "606687457668",
+          appId: "1:606687457668:web:cdca14efacc9516b2aedd1",
+          measurementId: "G-HGDDEJ8N20"
+        };
 
         let app, db, auth;
         try {
@@ -63,7 +91,6 @@ const firebaseConfig = {
         const { useState, useEffect, useRef } = React;
 
         // --- UTILS (CHAOTIC RANDOMNESS) ---
-        // FNV-1a Hash: Ensures distinct X and Y values even for same ID
         const fnv1aHash = (str, seed) => {
             let h = 0x811c9dc5 ^ seed;
             for (let i = 0; i < str.length; i++) {
@@ -86,18 +113,13 @@ const firebaseConfig = {
         const generateRemix = (texts) => {
             const output = [];
             
-            // Simply iterate through each selected note and pick one random line
             texts.forEach(text => {
-                // Split by newline, period, exclamation, or question mark
                 const lines = text.split(/[\r\n.!?]+/);
-                
-                // Filter out short noise
                 const validLines = lines
                     .map(line => line.trim())
                     .filter(line => line.length > 5);
                 
                 if (validLines.length > 0) {
-                    // Pick exactly one random line from this note
                     const randomLine = validLines[Math.floor(Math.random() * validLines.length)];
                     output.push(randomLine);
                 }
@@ -127,37 +149,115 @@ const firebaseConfig = {
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [isColliding, setIsColliding] = useState(false);
 
-            // Favorites Logic
+            // Enhanced Favorites Logic
             const [favorites, setFavorites] = useState(() => {
                 const saved = localStorage.getItem('nebulaFavorites');
                 return saved ? JSON.parse(saved) : [];
             });
+            
+            const [favoritesFilter, setFavoritesFilter] = useState('all');
+            const [favoritesSearch, setFavoritesSearch] = useState('');
+            const [starAnimation, setStarAnimation] = useState(null);
 
-            const toggleFavorite = (text, type = 'collision') => {
+            // Backup favorites to localStorage
+            useEffect(() => {
+                localStorage.setItem('nebulaFavorites', JSON.stringify(favorites));
+            }, [favorites]);
+
+            // Auto-backup feature
+            useEffect(() => {
+                const backupInterval = setInterval(() => {
+                    if (favorites.length > 0) {
+                        const backup = {
+                            timestamp: new Date().toISOString(),
+                            count: favorites.length,
+                            data: favorites
+                        };
+                        localStorage.setItem('nebulaFavorites_backup', JSON.stringify(backup));
+                    }
+                }, 3600000); // 1 hour
+                
+                return () => clearInterval(backupInterval);
+            }, [favorites]);
+
+            const toggleFavorite = (text, type = 'collision', metadata = {}) => {
                 if (!text) return;
                 const exists = favorites.find(f => f.text === text);
                 let newFavs;
+                
+                // Trigger animation
+                setStarAnimation(text);
+                setTimeout(() => setStarAnimation(null), 600);
+                
                 if (exists) {
                     newFavs = favorites.filter(f => f.text !== text);
                 } else {
                     newFavs = [{ 
-                        id: Date.now(), 
+                        id: Date.now() + Math.random(),
                         text, 
-                        type, 
-                        date: new Date().toLocaleDateString() 
+                        type,
+                        date: new Date().toISOString(),
+                        timestamp: Date.now(),
+                        ...metadata
                     }, ...favorites];
                 }
                 setFavorites(newFavs);
-                localStorage.setItem('nebulaFavorites', JSON.stringify(newFavs));
             };
 
             const isFav = (text) => favorites.some(f => f.text === text);
+
+            // Filter favorites function
+            const filteredFavorites = favorites.filter(fav => {
+                if (favoritesFilter !== 'all' && fav.type !== favoritesFilter) return false;
+                if (favoritesSearch && !fav.text.toLowerCase().includes(favoritesSearch.toLowerCase())) return false;
+                return true;
+            });
+
+            // Sort favorites (newest first)
+            const sortedFavorites = [...filteredFavorites].sort((a, b) => b.timestamp - a.timestamp);
+
+            const exportFavorites = () => {
+                const dataStr = JSON.stringify(favorites, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                const exportFileDefaultName = `nebula-favorites-${new Date().toISOString().split('T')[0]}.json`;
+                
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+            };
+
+            const importFavorites = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const imported = JSON.parse(e.target.result);
+                        if (Array.isArray(imported)) {
+                            const merged = [...favorites];
+                            imported.forEach(item => {
+                                if (!merged.find(f => f.text === item.text)) {
+                                    merged.push({...item, id: Date.now() + Math.random()});
+                                }
+                            });
+                            setFavorites(merged);
+                            alert(`Imported ${imported.length} favorites`);
+                        }
+                    } catch (err) {
+                        alert('Invalid file format');
+                    }
+                };
+                reader.readAsText(file);
+            };
 
             // Animation Refs
             const canvasRef = useRef(null);
             const requestRef = useRef();
             const collisionProgress = useRef(0);
             const isAnimatingRef = useRef(false);
+            const importInputRef = useRef(null);
 
             // 1. AUTH & DATA SYNC
             useEffect(() => {
@@ -181,9 +281,7 @@ const firebaseConfig = {
                 return () => { unsubAuth(); unsubData(); };
             }, []);
 
-            // Helper to format nodes with chaotic distribution
             const mapDocToNode = (id, data) => {
-                // Use distinct large prime seeds for X and Y to decorrelate them
                 const randX = fnv1aHash(id, 0x811c9dc5);
                 const randY = fnv1aHash(id, 0x1000193); 
                 
@@ -450,6 +548,11 @@ const firebaseConfig = {
                             {/* Favorites Button */}
                             <button onClick={() => setShowFavorites(true)} className="bg-zinc-100 hover:bg-white text-black w-10 h-10 md:w-auto md:px-4 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center justify-center shrink-0">
                                 <i className="ph ph-star text-lg font-bold"></i>
+                                {favorites.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">
+                                        {favorites.length}
+                                    </span>
+                                )}
                             </button>
 
                             {/* Add Button */}
@@ -500,10 +603,10 @@ const firebaseConfig = {
                                 <div className="flex-grow overflow-y-auto custom-scroll bg-black/50 p-6 rounded-xl border border-zinc-800/50 mb-6 relative group">
                                     <p className="text-base md:text-xl text-zinc-100 font-serif leading-loose whitespace-pre-wrap text-center select-text cursor-text">{remixResult}</p>
                                     <button 
-                                        onClick={() => toggleFavorite(remixResult, 'collision')} 
-                                        className="absolute top-2 right-2 text-zinc-500 hover:text-red-500 transition-colors"
+                                        onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix' })} 
+                                        className={`absolute top-2 right-2 transition-all ${starAnimation === remixResult ? 'star-burst' : ''}`}
                                     >
-                                        <i className={`ph-fill ph-heart text-xl ${isFav(remixResult) ? 'text-red-500' : ''}`}></i>
+                                        <i className={`ph-fill ph-heart text-xl ${isFav(remixResult) ? 'text-red-500 pulse-fav' : 'text-zinc-500 hover:text-red-500'}`}></i>
                                     </button>
                                 </div>
                                 <div className="flex justify-center">
@@ -515,38 +618,163 @@ const firebaseConfig = {
                         </div>
                     )}
 
-                    {/* FAVORITES MODAL */}
+                    {/* ENHANCED FAVORITES MODAL */}
                     {showFavorites && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] fade-in">
+                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] fade-in">
                                 <div className="flex justify-between items-center mb-6 border-b border-zinc-800 pb-4">
                                     <h2 className="text-xl font-light text-white flex items-center gap-2">
                                         <i className="ph-fill ph-star text-yellow-500"></i> STARRED FRAGMENTS
+                                        <span className="text-sm text-zinc-500 ml-2">({favorites.length})</span>
                                     </h2>
-                                    <button onClick={() => setShowFavorites(false)} className="text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
+                                    <button onClick={() => setShowFavorites(false)} className="text-zinc-500 hover:text-white">
+                                        <i className="ph ph-x text-xl"></i>
+                                    </button>
                                 </div>
                                 
-                                <div className="flex-grow overflow-y-auto custom-scroll space-y-4">
-                                    {favorites.length === 0 ? (
-                                        <div className="text-center text-zinc-500 py-10 italic">No stars collected yet.</div>
+                                {/* Statistics Dashboard */}
+                                <div className="grid grid-cols-3 gap-2 mb-6">
+                                    <div className="bg-black/30 p-3 rounded-lg text-center">
+                                        <div className="text-2xl font-bold text-white">{favorites.length}</div>
+                                        <div className="text-xs text-zinc-500">Total</div>
+                                    </div>
+                                    <div className="bg-black/30 p-3 rounded-lg text-center">
+                                        <div className="text-2xl font-bold text-yellow-500">{favorites.filter(f => f.type === 'collision').length}</div>
+                                        <div className="text-xs text-zinc-500">Collisions</div>
+                                    </div>
+                                    <div className="bg-black/30 p-3 rounded-lg text-center">
+                                        <div className="text-2xl font-bold text-blue-500">{favorites.filter(f => f.type === 'signal').length}</div>
+                                        <div className="text-xs text-zinc-500">Signals</div>
+                                    </div>
+                                </div>
+                                
+                                {/* Filters & Search */}
+                                <div className="flex flex-col md:flex-row gap-3 mb-6">
+                                    <div className="bg-zinc-800/50 rounded-lg p-2 flex gap-1">
+                                        {['all', 'collision', 'signal'].map(type => (
+                                            <button
+                                                key={type}
+                                                onClick={() => setFavoritesFilter(type)}
+                                                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${favoritesFilter === type ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'}`}
+                                            >
+                                                {type.charAt(0).toUpperCase() + type.slice(1)}
+                                                {type !== 'all' && ` (${favorites.filter(f => f.type === type).length})`}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="bg-black/50 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 flex-1">
+                                        <i className="ph ph-magnifying-glass text-zinc-500"></i>
+                                        <input
+                                            type="text"
+                                            placeholder="Search favorites..."
+                                            value={favoritesSearch}
+                                            onChange={(e) => setFavoritesSearch(e.target.value)}
+                                            className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500"
+                                        />
+                                    </div>
+                                </div>
+                                
+                                {/* Favorites List */}
+                                <div className="flex-grow overflow-y-auto space-y-3 pr-2">
+                                    {sortedFavorites.length === 0 ? (
+                                        <div className="text-center text-zinc-500 py-10 italic">
+                                            {favoritesSearch || favoritesFilter !== 'all' 
+                                                ? "No matching stars." 
+                                                : "No stars collected yet. Favorite collisions or signals!"}
+                                        </div>
                                     ) : (
-                                        favorites.map(fav => (
-                                            <div key={fav.id} className="bg-black/50 p-4 rounded-xl border border-zinc-800 relative group">
-                                                <div className="text-xs text-zinc-500 mb-2 uppercase tracking-wide flex justify-between">
-                                                    <span>{fav.type}</span>
-                                                    <span>{fav.date}</span>
+                                        sortedFavorites.map(fav => (
+                                            <div key={fav.id} className="bg-black/40 hover:bg-zinc-900/60 p-4 rounded-xl border border-zinc-800 group transition-all hover:border-zinc-700">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${fav.type === 'collision' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-blue-500/20 text-blue-500'}`}>
+                                                            {fav.type}
+                                                        </span>
+                                                        <span className="text-xs text-zinc-500">
+                                                            {new Date(fav.timestamp).toLocaleDateString()} {new Date(fav.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button 
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(fav.text);
+                                                            }}
+                                                            className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-white transition-all"
+                                                            title="Copy"
+                                                        >
+                                                            <i className="ph ph-copy text-sm"></i>
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => toggleFavorite(fav.text)}
+                                                            className="text-red-500 hover:text-red-400 transition-colors"
+                                                            title="Remove"
+                                                        >
+                                                            <i className="ph-fill ph-trash text-sm"></i>
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text">{fav.text}</p>
-                                                <button 
-                                                    onClick={() => toggleFavorite(fav.text)} 
-                                                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-500 transition-all"
-                                                >
-                                                    <i className="ph-fill ph-trash text-lg"></i>
-                                                </button>
+                                                <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text line-clamp-3 hover:line-clamp-none transition-all">
+                                                    {fav.text}
+                                                </p>
+                                                {fav.text.length > 200 && (
+                                                    <div className="text-xs text-zinc-500 mt-2 italic">
+                                                        {Math.ceil(fav.text.split(' ').length)} words
+                                                    </div>
+                                                )}
                                             </div>
                                         ))
                                     )}
                                 </div>
+                                
+                                {/* Actions Bar */}
+                                {favorites.length > 0 && (
+                                    <div className="mt-6 pt-4 border-t border-zinc-800 flex flex-col md:flex-row justify-between items-center gap-3">
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    if (confirm(`Clear all ${filteredFavorites.length} displayed favorites?`)) {
+                                                        const newFavs = favorites.filter(f => !filteredFavorites.includes(f));
+                                                        setFavorites(newFavs);
+                                                    }
+                                                }}
+                                                className="text-xs text-zinc-500 hover:text-red-500 transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-red-500"
+                                            >
+                                                <i className="ph ph-trash mr-1"></i> Clear Displayed
+                                            </button>
+                                            <button 
+                                                onClick={() => {
+                                                    if (confirm(`Clear ALL ${favorites.length} favorites?`)) {
+                                                        setFavorites([]);
+                                                    }
+                                                }}
+                                                className="text-xs text-red-500 hover:text-red-400 transition-colors px-3 py-1 rounded border border-red-500/30 hover:border-red-500"
+                                            >
+                                                <i className="ph ph-warning mr-1"></i> Clear All
+                                            </button>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => importInputRef.current?.click()}
+                                                className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600"
+                                            >
+                                                <i className="ph ph-upload mr-1"></i> Import
+                                            </button>
+                                            <input
+                                                ref={importInputRef}
+                                                type="file"
+                                                accept=".json"
+                                                onChange={importFavorites}
+                                                className="hidden"
+                                            />
+                                            <button 
+                                                onClick={exportFavorites}
+                                                className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600"
+                                            >
+                                                <i className="ph ph-download mr-1"></i> Export
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -558,10 +786,10 @@ const firebaseConfig = {
                             <div className="flex justify-between items-center mb-4">
                                 <div className="inline-block px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-bold tracking-widest">ANONYMOUS SIGNAL</div>
                                 <button 
-                                    onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal')} 
-                                    className="text-zinc-500 hover:text-red-500 transition-colors"
+                                    onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id })}
+                                    className={`transition-all ${starAnimation === selectedNode?.content ? 'star-burst' : ''}`}
                                 >
-                                    <i className={`ph-fill ph-heart text-xl ${selectedNode && isFav(selectedNode.content) ? 'text-red-500' : ''}`}></i>
+                                    <i className={`ph-fill ph-heart text-xl ${selectedNode && isFav(selectedNode.content) ? 'text-red-500 pulse-fav' : 'text-zinc-500 hover:text-red-500'}`}></i>
                                 </button>
                             </div>
                             <p className="text-zinc-300 font-mono text-sm leading-relaxed whitespace-pre-wrap border-l-2 border-zinc-800 pl-4 select-text cursor-text">{selectedNode?.content}</p>
