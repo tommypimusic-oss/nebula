@@ -76,7 +76,8 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp, where, getDocs, startAt } 
+        // Added enableIndexedDbPersistence to imports
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp, where, getDocs, startAt, enableIndexedDbPersistence } 
         from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
@@ -95,6 +96,16 @@
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             auth = getAuth(app);
+            
+            // --- ENABLE OFFLINE PERSISTENCE (CACHING) ---
+            enableIndexedDbPersistence(db).catch((err) => {
+                if (err.code == 'failed-precondition') {
+                    console.warn("Persistence failed: Multiple tabs open.");
+                } else if (err.code == 'unimplemented') {
+                    console.warn("Persistence not supported by this browser.");
+                }
+            });
+            
         } catch (e) {
             console.error("Firebase Config Error:", e);
         }
@@ -279,15 +290,32 @@
             const touchRef = useRef({ mode: 'idle', dist: 0, startK: 1, cx: 0, cy: 0, viewX: 0, viewY: 0 });
 
             // 1. AUTH & DATA SYNC
+            
+            // --- AUTHENTICATION HOOK ---
             useEffect(() => {
-                if (!auth || !db) return;
-
+                if (!auth) return;
+                
+                // This manages the sign-in state.
                 const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
-                    if (currentUser) setUser(currentUser);
-                    else signInAnonymously(auth).catch(console.error);
+                    if (currentUser) {
+                        setUser(currentUser);
+                    } else {
+                        // If no user, sign in immediately.
+                        signInAnonymously(auth).catch((error) => {
+                            console.error("Auth Failed:", error);
+                        });
+                    }
                 });
+                return () => unsubAuth();
+            }, []);
 
-                const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(500));
+            // --- DATA SYNC HOOK (DEPENDS ON USER) ---
+            useEffect(() => {
+                // CRITICAL FIX: Do not attempt to read data until we have a user.
+                // This prevents the "permission-denied" error on first load.
+                if (!user || !db) return;
+
+                const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"));
                 
                 const unsubData = onSnapshot(q, (snapshot) => {
                     const loadedIdeas = snapshot.docs.map(doc => {
@@ -295,21 +323,21 @@
                         return mapDocToNode(doc.id, data);
                     });
                     setIdeas(loadedIdeas);
+                }, (error) => {
+                    console.error("Data fetch error:", error);
                 });
 
-                return () => { unsubAuth(); unsubData(); };
-            }, []);
+                return () => unsubData();
+            }, [user]); // Only run this when 'user' changes (becomes available)
 
             const mapDocToNode = (id, data) => {
                 const randX = fnv1aHash(id, 0x811c9dc5);
                 const randY = fnv1aHash(id, 0x1000193); 
                 
-                // Nodes are placed in a fixed "world" size roughly 2000x2000 initially
-                // This prevents them from reshuffling when the window resizes, 
-                // but keeps them discoverable via pan/zoom.
-                const worldW = 2000;
-                const worldH = 2000;
-                const padding = 100;
+                // --- INCREASED WORLD SIZE FOR LIMITLESS DATA ---
+                const worldW = 4000;
+                const worldH = 4000;
+                const padding = 200;
 
                 return {
                     id: id,
@@ -352,15 +380,6 @@
 
                 // Apply View Transform
                 ctx.setTransform(view.k, 0, 0, view.k, view.x, view.y);
-
-                // Draw Grid (Optional, makes movement feel real)
-                /*
-                ctx.strokeStyle = '#111';
-                ctx.lineWidth = 1 / view.k;
-                ctx.beginPath();
-                for(let i=0; i<3000; i+=100) { ctx.moveTo(i,0); ctx.lineTo(i,3000); ctx.moveTo(0,i); ctx.lineTo(3000,i); }
-                ctx.stroke();
-                */
 
                 if (ideas.length > 0 && Math.random() < 0.1) {
                     const target = ideas[Math.floor(Math.random() * ideas.length)];
@@ -414,14 +433,6 @@
                         }
                     }
 
-                    // Scale radius inversely with zoom slightly so they don't get too tiny or huge
-                    // Or keep them scaling naturally. Let's scale naturally but clamp visual size.
-                    // Actually, natural scaling (just drawing circle) works best for infinite canvas feel.
-                    // But if zoomed out WAY far, we might want a min-size to see dots.
-                    const visualRadius = radius / Math.sqrt(view.k); 
-                    // Wait, ctx is scaled. Drawing radius=2 means 2 units in world.
-                    // If k=0.1, 2 units is 0.2 pixels (invisible).
-                    // We want nodes to remain visible dots.
                     const drawnRadius = Math.max(radius, 1.5 / view.k);
 
                     ctx.beginPath();
