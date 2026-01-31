@@ -203,28 +203,26 @@ export default function IdeaNebula() {
   }, []);
 
   // 2. DATA SYNC
-  useEffect(() => {
-    const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loadedIdeas = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
+useEffect(() => {
+  // Wait until Firebase Auth has confirmed the anonymous user
+  const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+    if (user) {
+      const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
+      const unsubscribeData = onSnapshot(q, (snapshot) => {
+        const ideasData = snapshot.docs.map(doc => ({
           id: doc.id,
-          content: data.content,
-          x: (stringHash(doc.id) % 1000) / 1000 * window.innerWidth, 
-          y: (stringHash(doc.id + "y") % 1000) / 1000 * window.innerHeight,
-          timestamp: data.timestamp,
-          glimmer: null
-        };
+          ...doc.data()
+        }));
+        setIdeas(ideasData);
+        setNodes(ideasData); // Ensure this updates the canvas nodes
       });
-      setIdeas(loadedIdeas);
-    }, (error) => {
-      console.error("Data sync error:", error);
-    });
 
-    return () => unsubscribe();
-  }, []);
+      return () => unsubscribeData();
+    }
+  });
+
+  return () => unsubscribeAuth();
+}, []);
 
   const stringHash = (str) => {
     let hash = 0;

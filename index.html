@@ -25,62 +25,42 @@
       .fade-in { animation: fadeIn 0.5s ease-out; }
       @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
       
-      /* Favorite animations */
-      .star-burst {
-        animation: starBurst 0.6s ease-out forwards;
-      }
-      
+      .star-burst { animation: starBurst 0.6s ease-out forwards; }
       @keyframes starBurst {
         0% { transform: scale(0.5); opacity: 0; }
         50% { transform: scale(1.2); opacity: 1; }
         100% { transform: scale(1); opacity: 1; }
       }
       
-      .pulse-fav {
-        animation: pulseFav 1s ease-in-out;
-      }
-      
+      .pulse-fav { animation: pulseFav 1s ease-in-out; }
       @keyframes pulseFav {
         0% { transform: scale(1); }
         50% { transform: scale(1.1); }
         100% { transform: scale(1); }
       }
-      
-      .line-clamp-3 {
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
-      
-      /* New animations */
-      @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-5px); }
-      }
-      
-      .float-animation {
-        animation: float 3s ease-in-out infinite;
-      }
+
+      .custom-scroll::-webkit-scrollbar { width: 6px; }
+      .custom-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+      .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+      .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
     </style>
 
     <!-- 2. React & Babel -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 3. Firebase Compat (The Fix) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
     <div id="root"></div>
 
-    <!-- 3. Application Logic -->
-    <script type="text/babel" data-type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        // Added enableIndexedDbPersistence to imports
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, limit, serverTimestamp, where, getDocs, startAt, enableIndexedDbPersistence } 
-        from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-        // 🔴 PASTE YOUR FIREBASE CONFIG HERE 🔴
+    <!-- 4. Application Logic -->
+    <script type="text/babel">
+        // 🔴 FIREBASE CONFIG 🔴
         const firebaseConfig = {
           apiKey: "AIzaSyBCBXsY55rxtKUx2HYXA7riczMRTiRKgMA",
           authDomain: "idea-nebula.firebaseapp.com",
@@ -91,28 +71,65 @@
           measurementId: "G-HGDDEJ8N20"
         };
 
-        let app, db, auth;
-        try {
-            app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-            
-            // --- ENABLE OFFLINE PERSISTENCE (CACHING) ---
-            enableIndexedDbPersistence(db).catch((err) => {
-                if (err.code == 'failed-precondition') {
-                    console.warn("Persistence failed: Multiple tabs open.");
-                } else if (err.code == 'unimplemented') {
-                    console.warn("Persistence not supported by this browser.");
-                }
-            });
-            
-        } catch (e) {
-            console.error("Firebase Config Error:", e);
+        // Initialize Firebase (Compat Mode)
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
         }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
 
-        const { useState, useEffect, useRef, useCallback } = React;
+        // Enable Offline Persistence
+        db.enablePersistence().catch((err) => {
+            if (err.code == 'failed-precondition') {
+                console.warn('Multiple tabs open, persistence disabled.');
+            } else if (err.code == 'unimplemented') {
+                console.warn('Browser does not support persistence.');
+            }
+        });
 
-        // --- UTILS (CHAOTIC RANDOMNESS) ---
+        const { useState, useEffect, useRef } = React;
+
+        // --- COLLIDER LOGIC ---
+        const generateRemix = (texts) => {
+            let pool = [];
+            texts.forEach(text => {
+                const lines = text.split(/[\n.]+/);
+                lines.forEach(line => {
+                    const clean = line.trim();
+                    if (clean.length > 5) pool.push(clean);
+                });
+            });
+
+            if (pool.length === 0) return "The void is silent.";
+            pool.sort(() => Math.random() - 0.5);
+
+            const output = [];
+            let currentLine = pool.shift();
+            output.push(currentLine);
+            const targetLength = Math.floor(Math.random() * 5) + 3;
+
+            while (output.length < targetLength && pool.length > 0) {
+                const currentWords = new Set(currentLine.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
+                let foundMatch = false;
+                for (let i = 0; i < pool.length; i++) {
+                    const candidate = pool[i];
+                    const candidateWords = new Set(candidate.toLowerCase().match(/\b[a-z]{3,}\b/g) || []);
+                    const intersection = new Set([...currentWords].filter(x => candidateWords.has(x)));
+                    if (intersection.size > 0) {
+                        currentLine = pool.splice(i, 1)[0];
+                        output.push(currentLine);
+                        foundMatch = true;
+                        break;
+                    }
+                }
+                if (!foundMatch) {
+                    currentLine = pool.shift();
+                    output.push(currentLine);
+                }
+            }
+            return output.join('\n');
+        };
+
         const fnv1aHash = (str, seed) => {
             let h = 0x811c9dc5 ^ seed;
             for (let i = 0; i < str.length; i++) {
@@ -120,40 +137,6 @@
                 h = Math.imul(h, 0x01000193);
             }
             return (h >>> 0) / 4294967296;
-        };
-
-        const generateAutoId = () => {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-            let autoId = '';
-            for (let i = 0; i < 20; i++) {
-                autoId += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return autoId;
-        }
-
-        // --- COLLIDER LOGIC (PURE RANDOM LINES) ---
-        const generateRemix = (texts) => {
-            const output = [];
-            
-            texts.forEach(text => {
-                // Split by newline, period, exclamation, or question mark
-                const lines = text.split(/[\r\n.!?]+/);
-                
-                // Filter out short noise
-                const validLines = lines
-                    .map(line => line.trim())
-                    .filter(line => line.length > 5);
-                
-                if (validLines.length > 0) {
-                    // Pick exactly one random line from this note
-                    const randomLine = validLines[Math.floor(Math.random() * validLines.length)];
-                    output.push(randomLine);
-                }
-            });
-
-            if (output.length === 0) return "The void is silent.";
-            
-            return output.join('\n');
         };
 
         // --- MAIN COMPONENT ---
@@ -167,64 +150,87 @@
             const [showAddModal, setShowAddModal] = useState(false);
             const [showRemixModal, setShowRemixModal] = useState(false);
             const [showFavorites, setShowFavorites] = useState(false);
-            
             const [remixResult, setRemixResult] = useState('');
             const [remixSources, setRemixSources] = useState([]);
-            
             const [newContent, setNewContent] = useState('');
             const [isSubmitting, setIsSubmitting] = useState(false);
-            const [isColliding, setIsColliding] = useState(false);
-
-            // VIEW & ZOOM STATE
+            
+            // View State
             const [view, setView] = useState({ x: 0, y: 0, k: 1 });
             const [isDragging, setIsDragging] = useState(false);
             const dragStart = useRef({ x: 0, y: 0 });
 
-            // Enhanced Favorites Logic
+            // Favorites State
             const [favorites, setFavorites] = useState(() => {
                 const saved = localStorage.getItem('nebulaFavorites');
                 return saved ? JSON.parse(saved) : [];
             });
-            
             const [favoritesFilter, setFavoritesFilter] = useState('all');
             const [favoritesSearch, setFavoritesSearch] = useState('');
             const [starAnimation, setStarAnimation] = useState(null);
+            const importInputRef = useRef(null);
 
-            // NEW: Collision memory to avoid recent repeats
-            const [recentCollisions, setRecentCollisions] = useState(() => {
-                const saved = localStorage.getItem('nebulaRecentCollisions');
-                return saved ? JSON.parse(saved) : [];
-            });
-            
-            // NEW: Surprise mode for extra randomness
-            const [surpriseMode, setSurpriseMode] = useState(false);
+            const canvasRef = useRef(null);
+            const requestRef = useRef();
 
-            // Backup favorites to localStorage
             useEffect(() => {
                 localStorage.setItem('nebulaFavorites', JSON.stringify(favorites));
             }, [favorites]);
 
-            // Save recent collisions
+            // Auth & Data Sync
             useEffect(() => {
-                localStorage.setItem('nebulaRecentCollisions', JSON.stringify(recentCollisions.slice(-50)));
-            }, [recentCollisions]);
+                const unsubAuth = auth.onAuthStateChanged((currentUser) => {
+                    if (currentUser) {
+                        setUser(currentUser);
+                    } else {
+                        auth.signInAnonymously().catch(console.error);
+                    }
+                });
+                return () => unsubAuth();
+            }, []);
 
+            useEffect(() => {
+                if (!user) return; 
+
+                const q = db.collection("ideas").orderBy("timestamp", "desc");
+                
+                const unsubData = q.onSnapshot((snapshot) => {
+                    const loadedIdeas = snapshot.docs.map(doc => {
+                        const data = doc.data();
+                        const randX = fnv1aHash(doc.id, 0x811c9dc5);
+                        const randY = fnv1aHash(doc.id, 0x1000193); 
+                        const worldW = 4000;
+                        const worldH = 4000;
+                        const padding = 200;
+                        
+                        return {
+                            id: doc.id,
+                            content: data.content,
+                            timestamp: data.timestamp, 
+                            x: (padding) + (randX * (worldW - padding * 2)),
+                            y: (padding) + (randY * (worldH - padding * 2)),
+                            glimmer: null
+                        };
+                    });
+                    setIdeas(loadedIdeas);
+                });
+
+                return () => unsubData();
+            }, [user]);
+
+            // Utils
             const toggleFavorite = (text, type = 'collision', metadata = {}) => {
                 if (!text) return;
                 const exists = favorites.find(f => f.text === text);
                 let newFavs;
-                
-                // Trigger animation
                 setStarAnimation(text);
                 setTimeout(() => setStarAnimation(null), 600);
-                
                 if (exists) {
                     newFavs = favorites.filter(f => f.text !== text);
                 } else {
                     newFavs = [{ 
                         id: Date.now() + Math.random(),
-                        text, 
-                        type,
+                        text, type,
                         date: new Date().toISOString(),
                         timestamp: Date.now(),
                         ...metadata
@@ -235,31 +241,25 @@
 
             const isFav = (text) => favorites.some(f => f.text === text);
 
-            // Filter favorites function
             const filteredFavorites = favorites.filter(fav => {
                 if (favoritesFilter !== 'all' && fav.type !== favoritesFilter) return false;
                 if (favoritesSearch && !fav.text.toLowerCase().includes(favoritesSearch.toLowerCase())) return false;
                 return true;
             });
-
-            // Sort favorites (newest first)
             const sortedFavorites = [...filteredFavorites].sort((a, b) => b.timestamp - a.timestamp);
 
             const exportFavorites = () => {
                 const dataStr = JSON.stringify(favorites, null, 2);
                 const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-                const exportFileDefaultName = `nebula-favorites-${new Date().toISOString().split('T')[0]}.json`;
-                
                 const linkElement = document.createElement('a');
                 linkElement.setAttribute('href', dataUri);
-                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.setAttribute('download', `nebula-favorites-${new Date().toISOString().split('T')[0]}.json`);
                 linkElement.click();
             };
 
             const importFavorites = (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
-                
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
@@ -267,118 +267,30 @@
                         if (Array.isArray(imported)) {
                             const merged = [...favorites];
                             imported.forEach(item => {
-                                if (!merged.find(f => f.text === item.text)) {
-                                    merged.push({...item, id: Date.now() + Math.random()});
-                                }
+                                if (!merged.find(f => f.text === item.text)) merged.push({...item, id: Date.now() + Math.random()});
                             });
                             setFavorites(merged);
                             alert(`Imported ${imported.length} favorites`);
                         }
-                    } catch (err) {
-                        alert('Invalid file format');
-                    }
+                    } catch (err) { alert('Invalid file format'); }
                 };
                 reader.readAsText(file);
             };
 
-            // Animation Refs
-            const canvasRef = useRef(null);
-            const requestRef = useRef();
-            const collisionProgress = useRef(0);
-            const isAnimatingRef = useRef(false);
-            const importInputRef = useRef(null);
-            const touchRef = useRef({ mode: 'idle', dist: 0, startK: 1, cx: 0, cy: 0, viewX: 0, viewY: 0 });
+            // Canvas & Interaction
+            const screenToWorld = (sx, sy) => ({
+                x: (sx - view.x) / view.k,
+                y: (sy - view.y) / view.k
+            });
 
-            // 1. AUTH & DATA SYNC
-            
-            // --- AUTHENTICATION HOOK ---
-            useEffect(() => {
-                if (!auth) return;
-                
-                // This manages the sign-in state.
-                const unsubAuth = onAuthStateChanged(auth, (currentUser) => {
-                    if (currentUser) {
-                        setUser(currentUser);
-                    } else {
-                        // If no user, sign in immediately.
-                        signInAnonymously(auth).catch((error) => {
-                            console.error("Auth Failed:", error);
-                        });
-                    }
-                });
-                return () => unsubAuth();
-            }, []);
-
-            // --- DATA SYNC HOOK (DEPENDS ON USER) ---
-            useEffect(() => {
-                // CRITICAL FIX: Do not attempt to read data until we have a user.
-                // This prevents the "permission-denied" error on first load.
-                if (!user || !db) return;
-
-                const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"));
-                
-                const unsubData = onSnapshot(q, (snapshot) => {
-                    const loadedIdeas = snapshot.docs.map(doc => {
-                        const data = doc.data();
-                        return mapDocToNode(doc.id, data);
-                    });
-                    setIdeas(loadedIdeas);
-                }, (error) => {
-                    console.error("Data fetch error:", error);
-                });
-
-                return () => unsubData();
-            }, [user]); // Only run this when 'user' changes (becomes available)
-
-            const mapDocToNode = (id, data) => {
-                const randX = fnv1aHash(id, 0x811c9dc5);
-                const randY = fnv1aHash(id, 0x1000193); 
-                
-                // --- INCREASED WORLD SIZE FOR LIMITLESS DATA ---
-                const worldW = 4000;
-                const worldH = 4000;
-                const padding = 200;
-
-                return {
-                    id: id,
-                    content: data.content,
-                    x: (padding) + (randX * (worldW - padding * 2)),
-                    y: (padding) + (randY * (worldH - padding * 2)),
-                    timestamp: data.timestamp,
-                    glimmer: null
-                };
-            };
-
-            // 2. COORDINATE UTILS
-            const screenToWorld = (sx, sy) => {
-                return {
-                    x: (sx - view.x) / view.k,
-                    y: (sy - view.y) / view.k
-                };
-            };
-
-            // 3. DRAW LOOP
             const draw = () => {
                 const canvas = canvasRef.current;
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 
-                if (isAnimatingRef.current && collisionProgress.current < 1.0) {
-                    collisionProgress.current += 0.008; 
-                    if (collisionProgress.current >= 1.0) {
-                        collisionProgress.current = 1.0;
-                        setShowRemixModal(true);
-                        setIsColliding(false);
-                        isAnimatingRef.current = false;
-                    }
-                }
-
-                // Clear screen
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
                 ctx.fillStyle = '#000000';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                // Apply View Transform
                 ctx.setTransform(view.k, 0, 0, view.k, view.x, view.y);
 
                 if (ideas.length > 0 && Math.random() < 0.1) {
@@ -390,23 +302,11 @@
                 }
 
                 ideas.forEach(node => {
-                    // Culling: Don't draw if way off screen
-                    // World coords of viewport
-                    const margin = 50 / view.k;
-                    if (
-                        node.x * view.k + view.x < -margin ||
-                        node.x * view.k + view.x > canvas.width + margin ||
-                        node.y * view.k + view.y < -margin ||
-                        node.y * view.k + view.y > canvas.height + margin
-                    ) {
-                        return; // Skip drawing
-                    }
-
                     const matchesSearch = searchTerm && node.content.toLowerCase().includes(searchTerm.toLowerCase());
                     const isDimmed = searchTerm && !matchesSearch;
                     
                     let color = '#ffffff';
-                    let radius = 2; // Base radius
+                    let radius = 2;
                     let glow = 0;
 
                     if (node.id === selectedNode?.id || remixSources.includes(node.id)) {
@@ -423,22 +323,10 @@
                         if (node.glimmer.life <= 0) node.glimmer = null;
                     }
 
-                    // NEW: Highlight notes that haven't been used recently
-                    const lastUsed = recentCollisions.find(rc => rc.ids.includes(node.id));
-                    if (lastUsed) {
-                        const daysSince = (Date.now() - lastUsed.timestamp) / (1000 * 60 * 60 * 24);
-                        if (daysSince > 7) { 
-                            radius = 2.5;
-                            color = '#60a5fa'; 
-                        }
-                    }
-
                     const drawnRadius = Math.max(radius, 1.5 / view.k);
-
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, drawnRadius, 0, Math.PI * 2);
                     ctx.fillStyle = color;
-                    // Adjust shadow for scale
                     ctx.shadowBlur = glow / view.k;
                     ctx.shadowColor = color;
                     ctx.fill();
@@ -446,43 +334,18 @@
                 });
 
                 if (remixSources.length > 1) {
-                    const nodes = remixSources.map(id => ideas.find(i => i.id === id)).filter(n => n);
-                    if (nodes.length > 1) {
-                        const pathNodes = [...nodes, nodes[0]];
-                        const totalSegments = pathNodes.length - 1;
-                        const currentT = collisionProgress.current * totalSegments;
-                        
-                        ctx.beginPath();
-                        ctx.strokeStyle = '#facc15';
-                        ctx.lineWidth = 1 / view.k; // Constant line width visually
-                        ctx.globalAlpha = 0.8;
-                        ctx.moveTo(pathNodes[0].x, pathNodes[0].y);
-
-                        const drawnSegments = Math.floor(currentT);
-                        for (let i = 0; i < drawnSegments; i++) ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
-
-                        if (drawnSegments < totalSegments) {
-                            const segmentProgress = currentT - drawnSegments;
-                            const start = pathNodes[drawnSegments];
-                            const end = pathNodes[drawnSegments + 1];
-                            const curX = start.x + (end.x - start.x) * segmentProgress;
-                            const curY = start.y + (end.y - start.y) * segmentProgress;
-                            ctx.lineTo(curX, curY);
-
-                            ctx.shadowBlur = 20 / view.k;
-                            ctx.shadowColor = '#ffffff';
-                            ctx.fillStyle = '#ffffff';
-                            ctx.beginPath(); ctx.arc(curX, curY, 4 / view.k, 0, Math.PI * 2); ctx.fill();
-                            ctx.shadowBlur = 0;
-                            
-                            ctx.beginPath();
-                            ctx.moveTo(pathNodes[0].x, pathNodes[0].y);
-                            for (let i = 0; i < drawnSegments; i++) ctx.lineTo(pathNodes[i+1].x, pathNodes[i+1].y);
-                            ctx.lineTo(curX, curY);
-                        }
-                        ctx.stroke();
-                        ctx.globalAlpha = 1.0;
-                    }
+                   const nodes = ideas.filter(i => remixSources.includes(i.id));
+                   if (nodes.length > 1) {
+                       ctx.beginPath();
+                       ctx.strokeStyle = '#facc15';
+                       ctx.lineWidth = 1 / view.k;
+                       ctx.globalAlpha = 0.6;
+                       ctx.moveTo(nodes[0].x, nodes[0].y);
+                       for(let i=1; i<nodes.length; i++) ctx.lineTo(nodes[i].x, nodes[i].y);
+                       ctx.lineTo(nodes[0].x, nodes[0].y);
+                       ctx.stroke();
+                       ctx.globalAlpha = 1.0;
+                   }
                 }
                 requestRef.current = requestAnimationFrame(draw);
             };
@@ -500,32 +363,18 @@
                 return () => cancelAnimationFrame(requestRef.current);
             }, [ideas, hoveredNode, selectedNode, searchTerm, remixSources, view]);
 
-            // 4. INTERACTION HANDLERS (ZOOM & PAN)
-            
-            // Mouse Wheel Zoom
+            // Interactions
             const handleWheel = (e) => {
                 e.preventDefault();
                 const zoomIntensity = 0.001;
                 const zoomFactor = Math.exp(-e.deltaY * zoomIntensity);
-                
                 const rect = canvasRef.current.getBoundingClientRect();
                 const mx = e.clientX - rect.left;
                 const my = e.clientY - rect.top;
-
-                // New scale
                 let newK = view.k * zoomFactor;
-                newK = Math.max(0.1, Math.min(newK, 5)); // Clamp zoom
-
-                // Adjust translate so mouse stays over same world point
-                // world = (screen - translate) / scale
-                // world is constant before/after
-                // (mx - oldTx) / oldK = (mx - newTx) / newK
-                // mx - newTx = (mx - oldTx) * (newK / oldK)
-                // newTx = mx - (mx - oldTx) * ratio
-                
+                newK = Math.max(0.1, Math.min(newK, 5));
                 const newX = mx - (mx - view.x) * (newK / view.k);
                 const newY = my - (my - view.y) * (newK / view.k);
-
                 setView({ k: newK, x: newX, y: newY });
             };
 
@@ -534,40 +383,27 @@
                 dragStart.current = { x: e.clientX, y: e.clientY };
             };
 
-            const handleMouseUp = () => {
-                setIsDragging(false);
-            };
+            const handleMouseUp = () => setIsDragging(false);
 
             const handleMouseMove = (e) => {
                 const rect = canvasRef.current.getBoundingClientRect();
                 const sx = e.clientX - rect.left;
                 const sy = e.clientY - rect.top;
 
-                // Pan Logic
                 if (isDragging) {
                     const dx = e.clientX - dragStart.current.x;
                     const dy = e.clientY - dragStart.current.y;
-                    
-                    setView(prev => ({
-                        ...prev,
-                        x: prev.x + dx,
-                        y: prev.y + dy
-                    }));
-                    
+                    setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
                     dragStart.current = { x: e.clientX, y: e.clientY };
-                    return; // Skip hover check while dragging
+                    return;
                 }
 
-                // Hover Logic
                 const { x: wx, y: wy } = screenToWorld(sx, sy);
-                
                 let found = null;
-                // Hit detection radius scales slightly to make clicking easier when zoomed out
                 const hitRadius = 10 / view.k; 
-
                 for (let i = ideas.length - 1; i >= 0; i--) {
                     const node = ideas[i];
-                    if (Math.hypot(node.x - wx, node.y - wy) < Math.max(hitRadius, 5)) { // Min hit area 5 units
+                    if (Math.hypot(node.x - wx, node.y - wy) < Math.max(hitRadius, 5)) {
                         found = node; 
                         break; 
                     }
@@ -575,185 +411,44 @@
                 setHoveredNode(found);
             };
 
-            const handleTouchStart = (e) => {
-                if (e.touches.length === 1) {
-                    touchRef.current.mode = 'drag';
-                    touchRef.current.startX = e.touches[0].clientX;
-                    touchRef.current.startY = e.touches[0].clientY;
-                    touchRef.current.viewX = view.x;
-                    touchRef.current.viewY = view.y;
-                } else if (e.touches.length === 2) {
-                    touchRef.current.mode = 'pinch';
-                    const dist = Math.hypot(
-                        e.touches[0].clientX - e.touches[1].clientX,
-                        e.touches[0].clientY - e.touches[1].clientY
-                    );
-                    touchRef.current.dist = dist;
-                    touchRef.current.startK = view.k;
-                    touchRef.current.cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                    touchRef.current.cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                    touchRef.current.viewX = view.x;
-                    touchRef.current.viewY = view.y;
-                }
-            };
-
-            const handleTouchMove = (e) => {
-                // Prevent browser scrolling
-                // e.preventDefault(); // Note: Passive listener issue in React, handled by css touch-action
-
-                if (touchRef.current.mode === 'drag' && e.touches.length === 1) {
-                    const dx = e.touches[0].clientX - touchRef.current.startX;
-                    const dy = e.touches[0].clientY - touchRef.current.startY;
-                    setView(prev => ({ ...prev, x: touchRef.current.viewX + dx, y: touchRef.current.viewY + dy }));
-                } else if (touchRef.current.mode === 'pinch' && e.touches.length === 2) {
-                    const dist = Math.hypot(
-                        e.touches[0].clientX - e.touches[1].clientX,
-                        e.touches[0].clientY - e.touches[1].clientY
-                    );
-                    
-                    const scaleFactor = dist / touchRef.current.dist;
-                    let newK = touchRef.current.startK * scaleFactor;
-                    newK = Math.max(0.1, Math.min(newK, 5));
-
-                    // Scale around center
-                    const cx = touchRef.current.cx;
-                    const cy = touchRef.current.cy;
-                    const oldX = touchRef.current.viewX;
-                    const oldY = touchRef.current.viewY;
-                    const oldK = touchRef.current.startK;
-
-                    // Math similar to mouse wheel
-                    const newX = cx - ((cx - oldX) / oldK) * newK;
-                    const newY = cy - ((cy - oldY) / oldK) * newK;
-
-                    setView({ k: newK, x: newX, y: newY });
-                }
-            };
-
-            const handleTouchEnd = () => {
-                touchRef.current.mode = 'idle';
-            };
-
             const handleClick = () => {
-                // If dragging occurred recently, don't treat as click
-                // (Simplified: we rely on isDragging state which clears on mouseUp)
-                // Ideally track distance moved between down/up to detect 'tap'
-                
                 if (hoveredNode) {
                     setSelectedNode(hoveredNode);
                 } else {
                     setSelectedNode(null);
-                    if (!isAnimatingRef.current) {
-                        setRemixSources([]);
-                        collisionProgress.current = 0;
-                    }
+                    setRemixSources([]);
                 }
             };
 
-            const resetView = () => {
-                setView({ x: 0, y: 0, k: 1 });
-            };
-
-            // Existing Methods
             const handleAddIdea = async () => {
-                if (!newContent.trim() || !db) return;
-                if (!user) { alert("Connecting... please wait."); return; }
+                if (!newContent.trim() || !user) return;
                 setIsSubmitting(true);
                 try {
-                    await addDoc(collection(db, "ideas"), {
+                    await db.collection("ideas").add({
                         content: newContent,
-                        timestamp: serverTimestamp(),
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                         source: "anonymous"
                     });
                     setNewContent('');
                     setShowAddModal(false);
-                } catch (e) { alert("Transmission failed."); } 
+                } catch (e) { alert("Failed to transmit."); }
                 finally { setIsSubmitting(false); }
             };
 
-            const handleRemix = async () => {
-                if (ideas.length < 3) { 
-                    alert("Not enough data in the void yet."); 
-                    return; 
-                }
-                if (isColliding) return;
-
-                setIsColliding(true);
-                
-                // Get random number of notes
-                let count;
-                if (surpriseMode) {
-                    count = Math.floor(Math.random() * 8) + 3; 
-                } else {
-                    count = Math.floor(Math.random() * 3) + 4; 
-                }
-                
-                const shuffled = [...ideas];
-                for (let i = shuffled.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                }
-                
-                const weightedShuffled = shuffled.map(idea => {
-                    const lastUsed = recentCollisions.find(rc => rc.ids.includes(idea.id));
-                    let weight = 1.0;
-                    if (lastUsed) {
-                        const hoursSince = (Date.now() - lastUsed.timestamp) / (1000 * 60 * 60);
-                        if (hoursSince < 1) weight = 0.1;
-                        else if (hoursSince < 24) weight = 0.5;
-                        else if (hoursSince > 168) weight = 2.0;
-                    }
-                    return { idea, weight };
-                });
-                
-                const selected = [];
-                const candidates = [...weightedShuffled];
-                
-                for (let i = 0; i < count && candidates.length > 0; i++) {
-                    const totalWeight = candidates.reduce((sum, item) => sum + item.weight, 0);
-                    let random = Math.random() * totalWeight;
-                    for (let j = 0; j < candidates.length; j++) {
-                        random -= candidates[j].weight;
-                        if (random <= 0) {
-                            selected.push(candidates[j].idea);
-                            candidates.splice(j, 1);
-                            break;
-                        }
-                    }
-                }
-                
-                if (selected.length < count) {
-                    const needed = count - selected.length;
-                    const remaining = shuffled.filter(idea => !selected.includes(idea));
-                    selected.push(...remaining.slice(0, needed));
-                }
-                
-                const collisionRecord = {
-                    timestamp: Date.now(),
-                    ids: selected.map(n => n.id),
-                    surpriseMode: surpriseMode
-                };
-                
-                setRecentCollisions(prev => [collisionRecord, ...prev.slice(0, 49)]);
-                
+            const handleRemix = () => {
+                if (ideas.length < 3) return;
+                const count = Math.floor(Math.random() * 3) + 3;
+                const shuffled = [...ideas].sort(() => 0.5 - Math.random());
+                const selected = shuffled.slice(0, count);
                 const result = generateRemix(selected.map(i => i.content));
-                
                 setRemixResult(result);
                 setRemixSources(selected.map(i => i.id));
-                
-                collisionProgress.current = 0;
-                isAnimatingRef.current = true;
-                
-                // Zoom out slightly to see the collision if needed, or center view?
-                // Let's just keep user view for now to avoid disorientation.
+                setShowRemixModal(true);
             };
 
-            const closeRemix = () => {
-                setShowRemixModal(false);
-                isAnimatingRef.current = false; 
-                collisionProgress.current = 1.0;
-            }
+            const resetView = () => setView({ x: 0, y: 0, k: 1 });
 
+            // UI
             return (
                 <div className="w-screen h-screen bg-black overflow-hidden font-sans text-white select-none relative">
                     <canvas 
@@ -764,24 +459,16 @@
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
                         onWheel={handleWheel}
-                        onTouchStart={handleTouchStart}
-                        onTouchMove={handleTouchMove}
-                        onTouchEnd={handleTouchEnd}
                         onClick={handleClick}
                     />
 
-                    {/* TOP BAR */}
+                    {/* Top Bar */}
                     <div className="absolute top-0 left-0 w-full p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center z-10 pointer-events-none gap-4">
                         <div className="pointer-events-auto">
                             <h1 className="text-xl md:text-3xl font-light tracking-[0.2em] text-white opacity-90">IDEA NEBULA</h1>
                             <div className="text-[10px] md:text-xs text-zinc-500 mt-1 font-mono flex items-center gap-2">
                                 <span className={`w-2 h-2 rounded-full ${user ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
-                                {user ? <span className="text-green-500">CONNECTED • {ideas.length}</span> : "OFFLINE"}
-                                {surpriseMode && (
-                                    <span className="text-yellow-500 ml-2 flex items-center gap-1">
-                                        <i className="ph ph-lightning"></i> SURPRISE MODE
-                                    </span>
-                                )}
+                                {user ? `CONNECTED • ${ideas.length}` : "OFFLINE"}
                             </div>
                         </div>
                         <div className="flex gap-2 pointer-events-auto w-full md:w-auto">
@@ -789,68 +476,36 @@
                                 <i className="ph ph-magnifying-glass text-zinc-400"></i>
                                 <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500" />
                             </div>
-                            
-                            <button 
-                                onClick={resetView}
-                                className="bg-zinc-800 text-zinc-400 hover:text-white w-10 h-10 rounded-full shadow-lg transition-all hover:scale-105 flex items-center justify-center shrink-0"
-                                title="Reset View"
-                            >
+                            <button onClick={resetView} className="bg-zinc-800 text-zinc-400 hover:text-white w-10 h-10 rounded-full shadow-lg transition-all hover:scale-105 flex items-center justify-center shrink-0">
                                 <i className="ph ph-crosshair text-lg"></i>
                             </button>
-
-                            <button 
-                                onClick={() => setSurpriseMode(!surpriseMode)}
-                                className={`${surpriseMode ? 'bg-yellow-500 text-black' : 'bg-zinc-800 text-zinc-400'} w-10 h-10 rounded-full shadow-lg transition-all hover:scale-105 flex items-center justify-center shrink-0`}
-                                title={surpriseMode ? "Surprise mode ON" : "Turn on surprise mode"}
-                            >
-                                <i className="ph ph-lightning text-lg font-bold"></i>
-                            </button>
-                            
                             <button onClick={() => setShowFavorites(true)} className="bg-zinc-100 hover:bg-white text-black w-10 h-10 md:w-auto md:px-4 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center justify-center shrink-0 relative">
-                                <i className="ph ph-star text-lg font-bold"></i>
-                                {favorites.length > 0 && (
-                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">
-                                        {favorites.length}
-                                    </span>
-                                )}
+                                <i className="ph-fill ph-star text-lg font-bold"></i>
+                                {favorites.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center">{favorites.length}</span>}
                             </button>
-
                             <button onClick={() => setShowAddModal(true)} className="bg-zinc-100 hover:bg-white text-black w-10 h-10 md:w-auto md:px-4 rounded-full shadow-lg transition-transform hover:scale-105 flex items-center justify-center shrink-0">
                                 <i className="ph ph-plus text-lg font-bold"></i>
                             </button>
                         </div>
                     </div>
 
-                    {/* REMIX BUTTON */}
-                    <div className="absolute bottom-24 md:bottom-10 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-                        <button 
-                            onClick={handleRemix} 
-                            disabled={isColliding}
-                            className={`group flex items-center gap-2 ${surpriseMode ? 'bg-yellow-500/20 border-yellow-500' : 'bg-zinc-900/90 border-zinc-700'} backdrop-blur border text-white px-6 py-3 md:px-8 md:py-3 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95 ${isColliding ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            <i className={`ph ph-shuffle text-lg md:text-xl ${surpriseMode ? 'text-yellow-500 animate-spin' : 'text-yellow-500'} ${isColliding ? 'animate-spin' : 'group-hover:animate-spin'}`}></i>
-                            <span className="font-bold tracking-wide text-sm md:text-base group-hover:text-yellow-500 transition-colors">
-                                {isColliding ? 'DIVING DEEP...' : surpriseMode ? 'CHAOS COLLIDE' : 'COLLIDE'}
-                            </span>
+                    {/* Remix Button */}
+                    <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+                        <button onClick={handleRemix} className="group flex items-center gap-2 bg-zinc-900/90 backdrop-blur border border-zinc-700 hover:border-yellow-500 text-white px-8 py-3 rounded-full shadow-2xl transition-all hover:scale-105 active:scale-95">
+                            <i className="ph ph-shuffle text-yellow-500 text-lg group-hover:animate-spin"></i>
+                            <span className="font-bold tracking-wide group-hover:text-yellow-500 transition-colors">COLLIDE</span>
                         </button>
                     </div>
 
-                    {/* ZOOM INDICATOR */}
-                    <div className="absolute bottom-6 left-6 z-10 pointer-events-none text-zinc-600 text-xs font-mono">
-                        ZOOM: {(view.k * 100).toFixed(0)}%
-                        <br/>
-                        POS: {view.x.toFixed(0)}, {view.y.toFixed(0)}
-                    </div>
-
-                    {/* ADD MODAL */}
+                    {/* Add Modal */}
                     {showAddModal && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl fade-in">
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 fade-in">
+                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl">
                                 <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-lg md:text-xl font-light text-white">Contribute to the Void</h2>
+                                    <h2 className="text-xl font-light text-white">Contribute to the Void</h2>
                                     <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
                                 </div>
-                                <textarea value={newContent} onChange={(e) => setNewContent(e.target.value)} placeholder="Type a lyric, a thought, or a fragment of a dream..." className="w-full h-32 md:h-40 bg-black border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:border-yellow-500 outline-none resize-none mb-4 text-base" />
+                                <textarea value={newContent} onChange={(e) => setNewContent(e.target.value)} placeholder="Type a lyric, a thought, or a fragment of a dream..." className="w-full h-40 bg-black border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:border-yellow-500 outline-none resize-none mb-4" />
                                 <button onClick={handleAddIdea} disabled={isSubmitting} className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-zinc-200 transition-colors disabled:opacity-50">
                                     {isSubmitting ? "Transmitting..." : "Release to Nebula"}
                                 </button>
@@ -858,150 +513,75 @@
                         </div>
                     )}
 
-                    {/* REMIX MODAL */}
+                    {/* Remix Result */}
                     {showRemixModal && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 p-6 md:p-8 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] fade-in">
-                                <button onClick={closeRemix} className="absolute top-4 right-4 text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
-                                <div className="text-center mb-6">
-                                    <div className="inline-block px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-[10px] md:text-xs font-bold tracking-widest mb-2">
-                                        {surpriseMode ? 'CHAOTIC COLLISION' : 'COLLISION DETECTED'}
-                                    </div>
-                                </div>
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 fade-in">
+                            <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh]">
+                                <button onClick={() => setShowRemixModal(false)} className="absolute top-4 right-4 text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
+                                <div className="text-center mb-6"><div className="inline-block px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-xs font-bold tracking-widest mb-2">COLLISION DETECTED</div></div>
                                 <div className="flex-grow overflow-y-auto custom-scroll bg-black/50 p-6 rounded-xl border border-zinc-800/50 mb-6 relative group">
-                                    <p className="text-base md:text-xl text-zinc-100 font-serif leading-loose whitespace-pre-wrap text-center select-text cursor-text">{remixResult}</p>
-                                    <button 
-                                        onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix', surpriseMode })} 
-                                        className={`absolute top-2 right-2 transition-all ${starAnimation === remixResult ? 'star-burst' : ''}`}
-                                    >
-                                        <i className={`ph-fill ph-heart text-xl ${isFav(remixResult) ? 'text-red-500 pulse-fav' : 'text-zinc-500 hover:text-red-500'}`}></i>
+                                    <p className="text-lg md:text-xl text-zinc-100 font-serif leading-loose whitespace-pre-wrap text-center">{remixResult}</p>
+                                    <button onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix' })} className={`absolute top-2 right-2 transition-all ${starAnimation === remixResult ? 'star-burst' : ''}`}>
+                                        <i className={`text-xl ${isFav(remixResult) ? 'ph-fill ph-heart text-red-500' : 'ph ph-heart text-zinc-500 hover:text-red-500'}`}></i>
                                     </button>
                                 </div>
-                                <div className="flex justify-between items-center">
-                                    <button 
-                                        onClick={() => setSurpriseMode(!surpriseMode)}
-                                        className={`text-sm ${surpriseMode ? 'text-yellow-500' : 'text-zinc-400 hover:text-white'} transition-colors flex items-center gap-1`}
-                                    >
-                                        <i className="ph ph-lightning"></i>
-                                        {surpriseMode ? 'Normal Mode' : 'Surprise Mode'}
-                                    </button>
-                                    <button onClick={handleRemix} className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors">
-                                        <i className="ph ph-shuffle"></i> Reroll
-                                    </button>
+                                <div className="flex justify-center">
+                                    <button onClick={handleRemix} className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors"><i className="ph ph-shuffle"></i> Reroll</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* ENHANCED FAVORITES MODAL */}
+                    {/* Favorites Modal */}
                     {showFavorites && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] fade-in">
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 fade-in">
+                            <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
                                 <div className="flex justify-between items-center mb-6 border-b border-zinc-800 pb-4">
                                     <h2 className="text-xl font-light text-white flex items-center gap-2">
-                                        <i className="ph-fill ph-star text-yellow-500"></i> STARRED FRAGMENTS
-                                        <span className="text-sm text-zinc-500 ml-2">({favorites.length})</span>
+                                        <i className="ph-fill ph-star text-yellow-500"></i> STARRED FRAGMENTS <span className="text-sm text-zinc-500 ml-2">({favorites.length})</span>
                                     </h2>
-                                    <button onClick={() => setShowFavorites(false)} className="text-zinc-500 hover:text-white">
-                                        <i className="ph ph-x text-xl"></i>
-                                    </button>
+                                    <button onClick={() => setShowFavorites(false)} className="text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
                                 </div>
-                                
-                                {/* Filters & Search */}
+                                <div className="grid grid-cols-3 gap-2 mb-6">
+                                    <div className="bg-black/30 p-3 rounded-lg text-center"><div className="text-2xl font-bold text-white">{favorites.length}</div><div className="text-xs text-zinc-500">Total</div></div>
+                                    <div className="bg-black/30 p-3 rounded-lg text-center"><div className="text-2xl font-bold text-yellow-500">{favorites.filter(f => f.type === 'collision').length}</div><div className="text-xs text-zinc-500">Collisions</div></div>
+                                    <div className="bg-black/30 p-3 rounded-lg text-center"><div className="text-2xl font-bold text-blue-500">{favorites.filter(f => f.type === 'signal').length}</div><div className="text-xs text-zinc-500">Signals</div></div>
+                                </div>
                                 <div className="flex flex-col md:flex-row gap-3 mb-6">
                                     <div className="bg-zinc-800/50 rounded-lg p-2 flex gap-1">
                                         {['all', 'collision', 'signal'].map(type => (
-                                            <button
-                                                key={type}
-                                                onClick={() => setFavoritesFilter(type)}
-                                                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${favoritesFilter === type ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'}`}
-                                            >
-                                                {type.charAt(0).toUpperCase() + type.slice(1)}
-                                            </button>
+                                            <button key={type} onClick={() => setFavoritesFilter(type)} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${favoritesFilter === type ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'}`}>{type.toUpperCase()}</button>
                                         ))}
                                     </div>
                                     <div className="bg-black/50 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-2 flex-1">
                                         <i className="ph ph-magnifying-glass text-zinc-500"></i>
-                                        <input
-                                            type="text"
-                                            placeholder="Search favorites..."
-                                            value={favoritesSearch}
-                                            onChange={(e) => setFavoritesSearch(e.target.value)}
-                                            className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500"
-                                        />
+                                        <input type="text" placeholder="Search..." value={favoritesSearch} onChange={(e) => setFavoritesSearch(e.target.value)} className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500" />
                                     </div>
                                 </div>
-                                
-                                {/* Favorites List */}
                                 <div className="flex-grow overflow-y-auto space-y-3 pr-2 custom-scroll">
-                                    {sortedFavorites.length === 0 ? (
-                                        <div className="text-center text-zinc-500 py-10 italic">
-                                            {favoritesSearch || favoritesFilter !== 'all' 
-                                                ? "No matching stars." 
-                                                : "No stars collected yet. Favorite collisions or signals!"}
-                                        </div>
-                                    ) : (
-                                        sortedFavorites.map(fav => (
-                                            <div key={fav.id} className="bg-black/40 hover:bg-zinc-900/60 p-4 rounded-xl border border-zinc-800 group transition-all hover:border-zinc-700">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${fav.type === 'collision' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-blue-500/20 text-blue-500'}`}>
-                                                            {fav.type}
-                                                        </span>
-                                                        <span className="text-xs text-zinc-500">
-                                                            {new Date(fav.timestamp).toLocaleDateString()}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button 
-                                                            onClick={() => {
-                                                                navigator.clipboard.writeText(fav.text);
-                                                            }}
-                                                            className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-white transition-all"
-                                                            title="Copy"
-                                                        >
-                                                            <i className="ph ph-copy text-sm"></i>
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => toggleFavorite(fav.text)}
-                                                            className="text-red-500 hover:text-red-400 transition-colors"
-                                                            title="Remove"
-                                                        >
-                                                            <i className="ph-fill ph-trash text-sm"></i>
-                                                        </button>
-                                                    </div>
+                                    {sortedFavorites.map(fav => (
+                                        <div key={fav.id} className="bg-black/40 hover:bg-zinc-900/60 p-4 rounded-xl border border-zinc-800 group transition-all hover:border-zinc-700">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${fav.type === 'collision' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-blue-500/20 text-blue-500'}`}>{fav.type}</span>
+                                                    <span className="text-xs text-zinc-500">{new Date(fav.timestamp).toLocaleDateString()}</span>
                                                 </div>
-                                                <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text line-clamp-3 hover:line-clamp-none transition-all">
-                                                    {fav.text}
-                                                </p>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => navigator.clipboard.writeText(fav.text)} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-white transition-all"><i className="ph ph-copy"></i></button>
+                                                    <button onClick={() => toggleFavorite(fav.text)} className="text-red-500 hover:text-red-400 transition-colors"><i className="ph ph-trash"></i></button>
+                                                </div>
                                             </div>
-                                        ))
-                                    )}
+                                            <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text line-clamp-3 hover:line-clamp-none transition-all">{fav.text}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                                
-                                {/* Actions Bar */}
                                 {favorites.length > 0 && (
                                     <div className="mt-6 pt-4 border-t border-zinc-800 flex flex-col md:flex-row justify-between items-center gap-3">
+                                        <button onClick={() => setFavorites([])} className="text-xs text-red-500 hover:text-red-400 transition-colors px-3 py-1 rounded border border-red-500/30 hover:border-red-500 flex items-center gap-1"><i className="ph ph-warning"></i> Clear All</button>
                                         <div className="flex gap-2">
-                                            <button 
-                                                onClick={() => importInputRef.current?.click()}
-                                                className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600"
-                                            >
-                                                <i className="ph ph-upload mr-1"></i> Import
-                                            </button>
-                                            <input
-                                                ref={importInputRef}
-                                                type="file"
-                                                accept=".json"
-                                                onChange={importFavorites}
-                                                className="hidden"
-                                            />
-                                            <button 
-                                                onClick={exportFavorites}
-                                                className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600"
-                                            >
-                                                <i className="ph ph-download mr-1"></i> Export
-                                            </button>
+                                            <button onClick={() => importInputRef.current?.click()} className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600 flex items-center gap-1"><i className="ph ph-upload"></i> Import</button>
+                                            <input ref={importInputRef} type="file" accept=".json" onChange={importFavorites} className="hidden" />
+                                            <button onClick={exportFavorites} className="text-xs text-zinc-500 hover:text-white transition-colors px-3 py-1 rounded border border-zinc-800 hover:border-zinc-600 flex items-center gap-1"><i className="ph ph-download"></i> Export</button>
                                         </div>
                                     </div>
                                 )}
@@ -1009,17 +589,14 @@
                         </div>
                     )}
 
-                    {/* DETAIL SIDEBAR */}
+                    {/* Detail Sidebar */}
                     <div className={`absolute top-0 right-0 h-full w-full md:w-96 bg-black/95 backdrop-blur border-l border-zinc-800 shadow-2xl transition-transform duration-300 z-40 p-8 overflow-y-auto ${selectedNode ? 'translate-x-0' : 'translate-x-full'}`}>
                         <button onClick={() => setSelectedNode(null)} className="absolute top-6 right-6 text-zinc-500 hover:text-white"><i className="ph ph-x text-xl"></i></button>
                         <div className="mt-12 relative group">
                             <div className="flex justify-between items-center mb-4">
-                                <div className="inline-block px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-bold tracking-widest">ANONYMOUS SIGNAL</div>
-                                <button 
-                                    onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id })}
-                                    className={`transition-all ${starAnimation === selectedNode?.content ? 'star-burst' : ''}`}
-                                >
-                                    <i className={`ph-fill ph-heart text-xl ${selectedNode && isFav(selectedNode.content) ? 'text-red-500 pulse-fav' : 'text-zinc-500 hover:text-red-500'}`}></i>
+                                <div className="inline-block px-2 py-1 rounded bg-zinc-800 text-zinc-400 text-[10px] font-bold tracking-widest mb-4">ANONYMOUS SIGNAL</div>
+                                <button onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id })} className={`transition-all ${starAnimation === selectedNode?.content ? 'pulse-fav' : ''}`}>
+                                    <i className={`text-xl ${selectedNode && isFav(selectedNode.content) ? 'ph-fill ph-heart text-red-500' : 'ph ph-heart text-zinc-500 hover:text-red-500'}`}></i>
                                 </button>
                             </div>
                             <p className="text-zinc-300 font-mono text-sm leading-relaxed whitespace-pre-wrap border-l-2 border-zinc-800 pl-4 select-text cursor-text">{selectedNode?.content}</p>
@@ -1028,7 +605,6 @@
                             </div>
                         </div>
                     </div>
-
                 </div>
             );
         }
