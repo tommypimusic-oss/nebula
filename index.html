@@ -159,6 +159,7 @@
             const [view, setView] = useState({ x: 0, y: 0, k: 1 });
             const [isDragging, setIsDragging] = useState(false);
             const dragStart = useRef({ x: 0, y: 0 });
+            const touchRef = useRef({ mode: 'idle', dist: 0, startK: 1, cx: 0, cy: 0, startViewX: 0, startViewY: 0, startX: 0, startY: 0 });
 
             // Favorites State
             const [favorites, setFavorites] = useState(() => {
@@ -420,6 +421,70 @@
                 }
             };
 
+            // Touch Handlers for Mobile
+            const handleTouchStart = (e) => {
+                if (e.touches.length === 1) {
+                    touchRef.current = {
+                        mode: 'drag',
+                        startX: e.touches[0].clientX,
+                        startY: e.touches[0].clientY,
+                        startViewX: view.x,
+                        startViewY: view.y,
+                        isMoved: false
+                    };
+                } else if (e.touches.length === 2) {
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    touchRef.current = {
+                        mode: 'pinch',
+                        dist: dist,
+                        startK: view.k,
+                        cx: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+                        cy: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+                        startViewX: view.x,
+                        startViewY: view.y,
+                        isMoved: false
+                    };
+                }
+            };
+
+            const handleTouchMove = (e) => {
+                if (touchRef.current.mode === 'drag' && e.touches.length === 1) {
+                    const dx = e.touches[0].clientX - touchRef.current.startX;
+                    const dy = e.touches[0].clientY - touchRef.current.startY;
+                    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) touchRef.current.isMoved = true;
+                    
+                    setView(prev => ({ ...prev, x: touchRef.current.startViewX + dx, y: touchRef.current.startViewY + dy }));
+                } else if (touchRef.current.mode === 'pinch' && e.touches.length === 2) {
+                    touchRef.current.isMoved = true;
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    
+                    const scaleFactor = dist / touchRef.current.dist;
+                    let newK = touchRef.current.startK * scaleFactor;
+                    newK = Math.max(0.1, Math.min(newK, 5));
+
+                    const cx = touchRef.current.cx;
+                    const cy = touchRef.current.cy;
+                    const sx = touchRef.current.startViewX;
+                    const sy = touchRef.current.startViewY;
+                    const sk = touchRef.current.startK;
+
+                    const newX = cx - (cx - sx) * (newK / sk);
+                    const newY = cy - (cy - sy) * (newK / sk);
+
+                    setView({ k: newK, x: newX, y: newY });
+                }
+            };
+
+            const handleTouchEnd = () => {
+                touchRef.current.mode = 'idle';
+            };
+
             const handleAddIdea = async () => {
                 if (!newContent.trim() || !user) return;
                 setIsSubmitting(true);
@@ -459,6 +524,9 @@
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
                         onWheel={handleWheel}
+                        onTouchStart={handleTouchStart}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
                         onClick={handleClick}
                     />
 
