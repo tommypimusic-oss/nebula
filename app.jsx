@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
   query, orderBy, limit, serverTimestamp 
 } from 'firebase/firestore';
-import { Sparkles, Plus, Shuffle, Search, X, Info, Star, Heart, Copy, Trash2, Download, Upload, AlertTriangle } from 'lucide-react';
+import { Plus, Shuffle, Search, X, Star, Heart, Copy, Trash2, Download, Upload, AlertTriangle } from 'lucide-react';
 
 // 🔴 FIREBASE CONFIG 🔴
 const firebaseConfig = {
@@ -101,6 +101,8 @@ export default function IdeaNebula() {
   const canvasRef = useRef(null);
   const requestRef = useRef();
   const importInputRef = useRef(null);
+  const cameraRef = useRef({ x: 2000, y: 2000, zoom: 1 });
+  const pointerState = useRef({ active: false, startX: 0, startY: 0, originX: 2000, originY: 2000, pointerId: null, moved: false });
 
   // Backup favorites to localStorage
   useEffect(() => {
@@ -202,28 +204,6 @@ export default function IdeaNebula() {
       .catch((error) => console.error("Auth failed:", error));
   }, []);
 
-  // 2. DATA SYNC
-useEffect(() => {
-  // Wait until Firebase Auth has confirmed the anonymous user
-  const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-    if (user) {
-      const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
-      const unsubscribeData = onSnapshot(q, (snapshot) => {
-        const ideasData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setIdeas(ideasData);
-        setNodes(ideasData); // Ensure this updates the canvas nodes
-      });
-
-      return () => unsubscribeData();
-    }
-  });
-
-  return () => unsubscribeAuth();
-}, []);
-
   const stringHash = (str) => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -232,16 +212,84 @@ useEffect(() => {
     return Math.abs(hash);
   };
 
+  const getNodePosition = (node) => {
+    if (typeof node.x === 'number' && typeof node.y === 'number') {
+      return [node.x, node.y];
+    }
+
+    const key = `${node.id}-${node.content ?? ''}`;
+    const hash = stringHash(key);
+    const angle = (hash % 360) * (Math.PI / 180);
+    const radius = 1200 + (hash % 1400);
+    return [2000 + Math.cos(angle) * radius, 2000 + Math.sin(angle) * radius];
+  };
+
+  // 2. DATA SYNC
+  useEffect(() => {
+    // Wait until Firebase Auth has confirmed the anonymous user
+    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
+      if (user) {
+        const q = query(collection(db, "ideas"), orderBy("timestamp", "desc"), limit(2000));
+        const unsubscribeData = onSnapshot(q, (snapshot) => {
+          const ideasData = snapshot.docs.map(doc => {
+            const data = doc.data();
+            const [x, y] = getNodePosition({ id: doc.id, ...data });
+            return {
+              id: doc.id,
+              ...data,
+              x,
+              y
+            };
+          });
+          setIdeas(ideasData);
+        });
+
+        return () => unsubscribeData();
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
   // 3. CANVAS RENDERING
+  const drawStar = (ctx, x, y, radius) => {
+    const spikes = 5;
+    const outerRadius = radius;
+    const innerRadius = radius * 0.45;
+    const step = Math.PI / spikes;
+    let rot = Math.PI / 2 * 3;
+    let cx = x;
+    let cy = y;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outerRadius);
+    for (let i = 0; i < spikes; i++) {
+      ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
+      rot += step;
+      ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
+      rot += step;
+    }
+    ctx.closePath();
+  };
+
   const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (ideas.length > 0 && Math.random() < 0.1) {
+    const worldSize = 4000;
+    const baseScale = Math.min(canvas.width / worldSize, canvas.height / worldSize);
+    const { x: camX, y: camY, zoom } = cameraRef.current;
+    const totalScale = baseScale * zoom;
+
+    ctx.setTransform(totalScale, 0, 0, totalScale, canvas.width / 2 - camX * totalScale, canvas.height / 2 - camY * totalScale);
+
+    if (ideas.length > 0 && Math.random() < 0.08) {
       const target = ideas[Math.floor(Math.random() * ideas.length)];
       if (!target.glimmer) {
         const colors = ['#facc15', '#ffffff', '#fb923c', '#ef4444'];
@@ -252,42 +300,50 @@ useEffect(() => {
       }
     }
 
+    const time = performance.now() / 600;
+
     ideas.forEach(node => {
       const matchesSearch = searchTerm && node.content.toLowerCase().includes(searchTerm.toLowerCase());
       const isDimmed = searchTerm && !matchesSearch;
       
       let color = '#ffffff';
-      let radius = 2;
+      let radius = 2.4;
       let glow = 0;
+      let alpha = 1.0;
 
       if (node.id === selectedNode?.id || remixSources.includes(node.id)) {
         color = '#facc15';
-        radius = 4;
-        glow = 15;
+        radius = 4.5;
+        glow = 20;
       } else if (node.id === hoveredNode?.id) {
         color = '#facc15';
-        radius = 3;
-        glow = 10;
+        radius = 3.5;
+        glow = 14;
       } else if (matchesSearch) {
         color = '#facc15';
-        radius = 3;
+        radius = 3.2;
       } else if (isDimmed) {
         color = '#333333';
+        alpha = 0.35;
       } else if (node.glimmer) {
         color = node.glimmer.color;
-        radius = 3;
-        glow = 10;
-        node.glimmer.life -= 0.02;
+        radius = 3.2;
+        glow = 14;
+        alpha = 0.95;
+        node.glimmer.life -= 0.03;
         if (node.glimmer.life <= 0) node.glimmer = null;
       }
 
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      const animateScale = 1 + 0.22 * Math.sin(time + (stringHash(node.id) % 20));
+      const drawRadius = Math.max((radius / baseScale) * animateScale, 1.4);
+      ctx.save();
+      drawStar(ctx, node.x, node.y, drawRadius);
       ctx.fillStyle = color;
-      ctx.shadowBlur = glow;
+      ctx.globalAlpha = alpha;
+      ctx.shadowBlur = glow / baseScale;
       ctx.shadowColor = color;
       ctx.fill();
-      ctx.shadowBlur = 0;
+      ctx.restore();
     });
 
     if (remixSources.length > 1) {
@@ -295,10 +351,10 @@ useEffect(() => {
       if (nodes.length > 1) {
         ctx.beginPath();
         ctx.strokeStyle = '#facc15';
-        ctx.lineWidth = 0.5;
-        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 0.7 / baseScale;
+        ctx.globalAlpha = 0.55;
         ctx.moveTo(nodes[0].x, nodes[0].y);
-        for(let i=1; i<nodes.length; i++) ctx.lineTo(nodes[i].x, nodes[i].y);
+        for (let i = 1; i < nodes.length; i++) ctx.lineTo(nodes[i].x, nodes[i].y);
         ctx.lineTo(nodes[0].x, nodes[0].y);
         ctx.stroke();
         ctx.globalAlpha = 1.0;
@@ -323,15 +379,24 @@ useEffect(() => {
 
   // 4. INTERACTION HANDLERS
   const handleMouseMove = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
+
+    const worldSize = 4000;
+    const baseScale = Math.min(canvas.width / worldSize, canvas.height / worldSize);
+    const totalScale = baseScale * cameraRef.current.zoom;
+    const worldX = (x - canvas.width / 2) / totalScale + cameraRef.current.x;
+    const worldY = (y - canvas.height / 2) / totalScale + cameraRef.current.y;
+
     let found = null;
     for (let i = ideas.length - 1; i >= 0; i--) {
       const node = ideas[i];
-      const dist = Math.hypot(node.x - x, node.y - y);
-      if (dist < 15) {
+      const dist = Math.hypot(node.x - worldX, node.y - worldY);
+      if (dist < 15 / baseScale) {
         found = node;
         break;
       }
@@ -340,12 +405,68 @@ useEffect(() => {
   };
 
   const handleClick = () => {
+    if (pointerState.current.moved) {
+      pointerState.current.moved = false;
+      return;
+    }
+
     if (hoveredNode) {
       setSelectedNode(hoveredNode);
     } else {
       setSelectedNode(null);
       setRemixSources([]);
     }
+  };
+
+  const handlePointerDown = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    pointerState.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: cameraRef.current.x,
+      originY: cameraRef.current.y,
+      pointerId: e.pointerId,
+      moved: false
+    };
+    canvas.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!pointerState.current.active || e.pointerId !== pointerState.current.pointerId) return;
+
+    const dx = e.clientX - pointerState.current.startX;
+    const dy = e.clientY - pointerState.current.startY;
+    if (Math.hypot(dx, dy) > 4) pointerState.current.moved = true;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const worldSize = 4000;
+    const baseScale = Math.min(canvas.width / worldSize, canvas.height / worldSize);
+    const totalScale = baseScale * cameraRef.current.zoom;
+
+    cameraRef.current.x = pointerState.current.originX - dx / totalScale;
+    cameraRef.current.y = pointerState.current.originY - dy / totalScale;
+  };
+
+  const handlePointerUp = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    pointerState.current.active = false;
+    canvas.releasePointerCapture(e.pointerId);
+  };
+
+  const handleWheel = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    e.preventDefault();
+
+    const delta = -e.deltaY;
+    const factor = delta > 0 ? 1.08 : 0.92;
+    cameraRef.current.zoom = Math.min(3.5, Math.max(0.35, cameraRef.current.zoom * factor));
   };
 
   const handleAddIdea = async () => {
@@ -393,9 +514,13 @@ useEffect(() => {
       {/* BACKGROUND CANVAS */}
       <canvas 
         ref={canvasRef} 
-        className="absolute inset-0 z-0 cursor-crosshair"
+        className="absolute inset-0 z-0 cursor-grab"
         onMouseMove={handleMouseMove}
         onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onWheel={handleWheel}
       />
 
       {/* TOP BAR */}
@@ -582,6 +707,7 @@ useEffect(() => {
                   <div key={fav.id} className="bg-black/40 hover:bg-zinc-900/60 p-4 rounded-xl border border-zinc-800 group transition-all hover:border-zinc-700">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
+                        <Star className="w-4 h-4 text-yellow-400" />
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${fav.type === 'collision' ? 'bg-yellow-500/20 text-yellow-500' : 'bg-blue-500/20 text-blue-500'}`}>
                           {fav.type}
                         </span>
