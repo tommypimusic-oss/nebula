@@ -524,48 +524,52 @@ export default function IdeaNebula() {
       />
 
       {/* TOP BAR */}
-      <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-start z-10 pointer-events-none">
-        <div>
-          <h1 className="text-3xl font-light tracking-[0.2em] text-white opacity-90">
-            IDEA NEBULA
-          </h1>
-          <div className="text-xs text-zinc-500 mt-2 font-mono flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            LIVE COLLECTIVE • {ideas.length} NODES
+      <div className="absolute top-0 left-0 w-full p-4 sm:p-6 z-10 pointer-events-none">
+        <div className="flex flex-col gap-3 md:flex-row md:justify-between md:items-start">
+          <div className="pointer-events-none">
+            <h1 className="text-2xl sm:text-3xl font-light tracking-[0.2em] text-white opacity-90">
+              IDEA NEBULA
+            </h1>
+            <div className="text-xs text-zinc-500 mt-2 font-mono flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+              LIVE COLLECTIVE • {ideas.length} NODES
+            </div>
           </div>
-        </div>
 
-        <div className="flex gap-3 pointer-events-auto">
-          <div className="bg-zinc-900/80 backdrop-blur border border-zinc-800 rounded-full px-4 py-2 flex items-center gap-2 shadow-lg w-64 focus-within:w-80 transition-all">
-            <Search className="w-4 h-4 text-zinc-400" />
-            <input 
-              type="text" 
-              placeholder="Search the void..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500"
-            />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end pointer-events-auto w-full md:w-auto">
+            <div className="bg-zinc-900/80 backdrop-blur border border-zinc-800 rounded-full px-4 py-2 flex items-center gap-2 shadow-lg w-full sm:w-64 focus-within:w-full sm:focus-within:w-80 transition-all min-w-0">
+              <Search className="w-4 h-4 text-zinc-400 shrink-0" />
+              <input 
+                type="text" 
+                placeholder="Search the void..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-transparent border-none outline-none text-sm w-full text-white placeholder-zinc-500"
+              />
+            </div>
+            
+            <div className="flex gap-2 sm:gap-3 self-end sm:self-auto">
+              {/* Favorites Button */}
+              <button 
+                onClick={() => setShowFavorites(true)}
+                className="bg-zinc-100 hover:bg-white text-black p-3 rounded-full shadow-lg transition-transform hover:scale-105 relative"
+              >
+                <Star className="w-5 h-5" />
+                {favorites.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                    {favorites.length}
+                  </span>
+                )}
+              </button>
+              
+              <button 
+                onClick={() => setShowAddModal(true)}
+                className="bg-zinc-100 hover:bg-white text-black p-3 rounded-full shadow-lg transition-transform hover:scale-105"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-          
-          {/* Favorites Button */}
-          <button 
-            onClick={() => setShowFavorites(true)}
-            className="bg-zinc-100 hover:bg-white text-black p-3 rounded-full shadow-lg transition-transform hover:scale-105 relative"
-          >
-            <Star className="w-5 h-5" />
-            {favorites.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                {favorites.length}
-              </span>
-            )}
-          </button>
-          
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="bg-zinc-100 hover:bg-white text-black p-3 rounded-full shadow-lg transition-transform hover:scale-105"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
         </div>
       </div>
 
