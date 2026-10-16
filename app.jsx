@@ -103,10 +103,10 @@ export default function IdeaNebula() {
   
   const [newContent, setNewContent] = useState('');
   const [capturedImage, setCapturedImage] = useState('');
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [remixImage, setRemixImage] = useState('');
+  const [imageUploadInputRef, setImageUploadInputRef] = useState(null);
 
   // Enhanced Favorites State
   const [favorites, setFavorites] = useState(() => {
@@ -121,8 +121,7 @@ export default function IdeaNebula() {
   const canvasRef = useRef(null);
   const requestRef = useRef();
   const importInputRef = useRef(null);
-  const videoRef = useRef(null);
-  const cameraStreamRef = useRef(null);
+  const photoInputRef = useRef(null);
   const cameraRef = useRef({ x: 2000, y: 2000, zoom: 1 });
   const pointerState = useRef({ active: false, startX: 0, startY: 0, originX: 2000, originY: 2000, pointerId: null, moved: false });
 
@@ -228,8 +227,8 @@ export default function IdeaNebula() {
 
   useEffect(() => {
     return () => {
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
       }
     };
   }, []);
@@ -500,67 +499,29 @@ export default function IdeaNebula() {
   };
 
   const stopCamera = () => {
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach(track => track.stop());
-      cameraStreamRef.current = null;
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraOpen(false);
+    setCameraError('');
   };
 
-  const openCamera = async () => {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setCameraError('Camera access is not supported on this device.');
-      return;
-    }
+  const handlePhotoSelection = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-    const attachStream = async (stream) => {
-      cameraStreamRef.current = stream;
-      setCameraError('');
-      setIsCameraOpen(true);
-
-      if (!videoRef.current) return;
-
-      videoRef.current.srcObject = stream;
-      videoRef.current.muted = true;
-      videoRef.current.playsInline = true;
-      videoRef.current.setAttribute('playsinline', 'true');
-      videoRef.current.setAttribute('webkit-playsinline', 'true');
-
+    const reader = new FileReader();
+    reader.onload = async (e) => {
       try {
-        await videoRef.current.play();
-      } catch (playError) {
-        console.warn('Camera play() was blocked by the browser:', playError);
-        setCameraError('Camera permission is allowed, but the preview is still loading. Please tap the camera again or refresh the page.');
+        const dataUrl = e.target.result;
+        const ascii = await createAsciiArt(dataUrl, 30);
+        setCapturedImage(ascii);
+        setCameraError('');
+      } catch (error) {
+        console.error('ASCII conversion failed:', error);
+        setCameraError('This file could not be converted. Please try another image.');
       }
     };
-
-    try {
-      const environmentStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' }
-        },
-        audio: false
-      });
-
-      await attachStream(environmentStream);
-    } catch (environmentError) {
-      console.warn('Environment camera failed, falling back to default camera:', environmentError);
-
-      try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
-        });
-
-        await attachStream(fallbackStream);
-      } catch (error) {
-        console.error(error);
-        setCameraError('Camera access was denied. Please allow the camera and try again.');
-      }
-    }
+    reader.readAsDataURL(file);
   };
 
   const createAsciiArt = (dataUrl, width = 32) => {
@@ -599,31 +560,6 @@ export default function IdeaNebula() {
       img.onerror = reject;
       img.src = dataUrl;
     });
-  };
-
-  const captureCameraPhoto = async () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const canvas = document.createElement('canvas');
-    const width = video.videoWidth || 1280;
-    const height = video.videoHeight || 720;
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, width, height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-
-    try {
-      const ascii = await createAsciiArt(dataUrl, 30);
-      setCapturedImage(ascii);
-    } catch (error) {
-      console.error('ASCII conversion failed:', error);
-      setCapturedImage(dataUrl);
-    }
-
-    stopCamera();
   };
 
   const resetCameraCapture = () => {
@@ -808,47 +744,24 @@ export default function IdeaNebula() {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-              ) : isCameraOpen ? (
-                <div className="rounded-2xl overflow-hidden border border-zinc-800 bg-black">
-                  <video
-                    ref={videoRef}
-                    className="w-full h-56 object-cover bg-black"
-                    playsInline
-                    autoPlay
-                    muted
-                    onLoadedMetadata={() => {
-                      if (videoRef.current) {
-                        videoRef.current.play().catch(() => {});
-                      }
-                    }}
-                  />
-                  <div className="p-3 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={captureCameraPhoto}
-                      className="flex-1 bg-yellow-500 text-black font-bold py-2 rounded-lg"
-                    >
-                      Capture photo
-                    </button>
-                    <button
-                      type="button"
-                      onClick={stopCamera}
-                      className="bg-zinc-800 text-white px-3 py-2 rounded-lg"
-                    >
-                      <CameraOff className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-zinc-700 bg-black/40 p-4">
                   <button
                     type="button"
-                    onClick={openCamera}
+                    onClick={() => photoInputRef.current?.click()}
                     className="w-full flex items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 text-white py-3 rounded-xl hover:border-yellow-500 transition-colors"
                   >
                     <Camera className="w-4 h-4 text-yellow-500" />
-                    Take photo with camera
+                    Choose photo from library
                   </button>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handlePhotoSelection}
+                    className="hidden"
+                  />
                 </div>
               )}
 
@@ -864,7 +777,7 @@ export default function IdeaNebula() {
             >
               {isSubmitting ? "Transmitting..." : "Release to Nebula"}
             </button>
-            <p className="text-center text-xs text-zinc-600 mt-4">Photos must be captured from the phone camera, not uploaded.</p>
+            <p className="text-center text-xs text-zinc-600 mt-4">Upload a photo from your library and convert it into a nebula signal.</p>
           </div>
         </div>
       )}
