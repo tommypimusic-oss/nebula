@@ -5,7 +5,7 @@ import {
   getFirestore, collection, addDoc, onSnapshot, 
   query, orderBy, limit, serverTimestamp 
 } from 'firebase/firestore';
-import { Plus, Shuffle, Search, X, Star, Heart, Copy, Trash2, Download, Upload, AlertTriangle } from 'lucide-react';
+import { Plus, Shuffle, Search, X, Star, Heart, Copy, Trash2, Download, Upload, AlertTriangle, Camera, CameraOff } from 'lucide-react';
 
 // 🔴 FIREBASE CONFIG 🔴
 const firebaseConfig = {
@@ -86,7 +86,11 @@ export default function IdeaNebula() {
   const [remixSources, setRemixSources] = useState([]);
   
   const [newContent, setNewContent] = useState('');
+  const [capturedImage, setCapturedImage] = useState('');
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [remixImage, setRemixImage] = useState('');
 
   // Enhanced Favorites State
   const [favorites, setFavorites] = useState(() => {
@@ -101,6 +105,8 @@ export default function IdeaNebula() {
   const canvasRef = useRef(null);
   const requestRef = useRef();
   const importInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const cameraRef = useRef({ x: 2000, y: 2000, zoom: 1 });
   const pointerState = useRef({ active: false, startX: 0, startY: 0, originX: 2000, originY: 2000, pointerId: null, moved: false });
 
@@ -202,6 +208,14 @@ export default function IdeaNebula() {
     signInAnonymously(auth)
       .then(() => console.log("Connected to the collective (Anonymous Auth)"))
       .catch((error) => console.error("Auth failed:", error));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
 
   const stringHash = (str) => {
@@ -469,8 +483,121 @@ export default function IdeaNebula() {
     cameraRef.current.zoom = Math.min(3.5, Math.max(0.35, cameraRef.current.zoom * factor));
   };
 
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraOpen(false);
+  };
+
+  const openCamera = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError('Camera access is not supported on this device.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+
+      cameraStreamRef.current = stream;
+      setCameraError('');
+      setIsCameraOpen(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (error) {
+      console.error(error);
+      setCameraError('Camera access was denied. Please allow the camera and try again.');
+    }
+  };
+
+  const createAsciiArt = (dataUrl, width = 32) => {
+    const asciiChars = ' .,:;irsXA253hMHGS#9B&@';
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const scale = width / img.width;
+        canvas.width = width;
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let ascii = '';
+
+        for (let y = 0; y < canvas.height; y++) {
+          let line = '';
+          for (let x = 0; x < canvas.width; x++) {
+            const index = (y * canvas.width + x) * 4;
+            const r = data[index];
+            const g = data[index + 1];
+            const b = data[index + 2];
+            const luminance = (r + g + b) / 3;
+            const charIndex = Math.floor((luminance / 255) * (asciiChars.length - 1));
+            line += asciiChars[charIndex];
+          }
+          ascii += line + '\n';
+        }
+
+        resolve(ascii.trim());
+      };
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+  };
+
+  const captureCameraPhoto = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const canvas = document.createElement('canvas');
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+
+    try {
+      const ascii = await createAsciiArt(dataUrl, 30);
+      setCapturedImage(ascii);
+    } catch (error) {
+      console.error('ASCII conversion failed:', error);
+      setCapturedImage(dataUrl);
+    }
+
+    stopCamera();
+  };
+
+  const resetCameraCapture = () => {
+    setCapturedImage('');
+    stopCamera();
+  };
+
   const handleAddIdea = async () => {
     if (!newContent.trim()) return;
+    if (!capturedImage) {
+      alert('Take a photo with the phone camera before releasing a signal.');
+      return;
+    }
     
     if (!auth.currentUser) {
       alert("Still connecting to the void... please wait a moment.");
@@ -481,11 +608,14 @@ export default function IdeaNebula() {
     try {
       await addDoc(collection(db, "ideas"), {
         content: newContent,
+        image: capturedImage,
         timestamp: serverTimestamp(),
         source: "anonymous"
       });
       setNewContent('');
+      setCapturedImage('');
       setShowAddModal(false);
+      stopCamera();
     } catch (e) {
       alert("Transmission failed. Check your connection or permissions.");
       console.error(e);
@@ -502,10 +632,29 @@ export default function IdeaNebula() {
     const selected = shuffled.slice(0, count);
     
     const result = generateRemix(selected.map(i => i.content));
+    const imagePool = selected.filter(item => item.image);
+    const randomImage = imagePool.length
+      ? imagePool[Math.floor(Math.random() * imagePool.length)].image
+      : (ideas.find(item => item.image) || {}).image || '';
     
     setRemixResult(result);
+    setRemixImage(randomImage);
     setRemixSources(selected.map(i => i.id));
     setShowRemixModal(true);
+  };
+
+  const renderSignalArt = (value, className = '') => {
+    if (!value) return null;
+
+    if (typeof value === 'string' && value.includes('\n') && !value.startsWith('data:image')) {
+      return (
+        <pre className={`whitespace-pre text-[6px] sm:text-[7px] leading-[0.7] tracking-[0.02em] text-zinc-100 font-mono bg-black/80 border border-zinc-800 rounded-xl p-3 overflow-auto ${className}`}>
+          {value}
+        </pre>
+      );
+    }
+
+    return <img src={value} alt="signal capture" className={`w-full object-cover ${className}`} />;
   };
 
   return (
@@ -590,22 +739,73 @@ export default function IdeaNebula() {
           <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-light text-white">Contribute to the Void</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white"><X className="w-6 h-6"/></button>
+              <button onClick={() => { setShowAddModal(false); resetCameraCapture(); }} className="text-zinc-500 hover:text-white"><X className="w-6 h-6"/></button>
             </div>
             <textarea 
               value={newContent}
               onChange={(e) => setNewContent(e.target.value)}
               placeholder="Type a lyric, a thought, or a fragment of a dream..."
-              className="w-full h-40 bg-black border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:border-yellow-500 outline-none resize-none mb-4"
+              className="w-full h-28 bg-black border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:border-yellow-500 outline-none resize-none mb-4"
             />
+
+            <div className="mb-4">
+              {capturedImage ? (
+                <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-black p-3">
+                  {renderSignalArt(capturedImage, 'max-h-56')} 
+                  <button
+                    type="button"
+                    onClick={resetCameraCapture}
+                    className="absolute top-2 right-2 bg-black/70 text-white rounded-full p-2"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : isCameraOpen ? (
+                <div className="rounded-2xl overflow-hidden border border-zinc-800 bg-black">
+                  <video ref={videoRef} className="w-full h-56 object-cover bg-black" playsInline autoPlay muted />
+                  <div className="p-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={captureCameraPhoto}
+                      className="flex-1 bg-yellow-500 text-black font-bold py-2 rounded-lg"
+                    >
+                      Capture photo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="bg-zinc-800 text-white px-3 py-2 rounded-lg"
+                    >
+                      <CameraOff className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-zinc-700 bg-black/40 p-4">
+                  <button
+                    type="button"
+                    onClick={openCamera}
+                    className="w-full flex items-center justify-center gap-2 bg-zinc-900 border border-zinc-800 text-white py-3 rounded-xl hover:border-yellow-500 transition-colors"
+                  >
+                    <Camera className="w-4 h-4 text-yellow-500" />
+                    Take photo with camera
+                  </button>
+                </div>
+              )}
+
+              {cameraError && (
+                <p className="mt-3 text-sm text-red-400">{cameraError}</p>
+              )}
+            </div>
+
             <button 
               onClick={handleAddIdea}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !capturedImage}
               className="w-full bg-white text-black font-bold py-3 rounded-xl hover:bg-zinc-200 transition-colors disabled:opacity-50"
             >
               {isSubmitting ? "Transmitting..." : "Release to Nebula"}
             </button>
-            <p className="text-center text-xs text-zinc-600 mt-4">Contributions are anonymous and permanent.</p>
+            <p className="text-center text-xs text-zinc-600 mt-4">Photos must be captured from the phone camera, not uploaded.</p>
           </div>
         </div>
       )}
@@ -620,12 +820,17 @@ export default function IdeaNebula() {
               <div className="inline-block px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-500 text-xs font-bold tracking-widest mb-2">COLLISION DETECTED</div>
             </div>
             
-            <div className="flex-grow overflow-y-auto custom-scroll bg-black/50 p-6 rounded-xl border border-zinc-800/50 mb-6 relative group">
+            <div className="flex-grow overflow-y-auto custom-scroll bg-black/50 p-6 rounded-xl border border-zinc-800/50 mb-6 relative group space-y-4">
+              {remixImage && (
+                <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-black p-3">
+                  {renderSignalArt(remixImage, 'max-h-72')} 
+                </div>
+              )}
               <p className="text-lg md:text-xl text-zinc-100 font-serif leading-loose whitespace-pre-wrap text-center">
                 {remixResult}
               </p>
               <button 
-                onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix' })} 
+                onClick={() => toggleFavorite(remixResult, 'collision', { source: 'remix', image: remixImage })} 
                 className={`absolute top-2 right-2 transition-all ${starAnimation === remixResult ? 'animate-pulse' : ''}`}
               >
                 <Heart className={`w-6 h-6 ${isFav(remixResult) ? 'fill-red-500 text-red-500' : 'text-zinc-500 hover:text-red-500'}`} />
@@ -738,6 +943,11 @@ export default function IdeaNebula() {
                         </button>
                       </div>
                     </div>
+                    {fav.image && (
+                      <div className="mb-3 overflow-hidden rounded-xl border border-zinc-800 bg-black p-2">
+                        {renderSignalArt(fav.image, 'h-40')}
+                      </div>
+                    )}
                     <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text line-clamp-3 hover:line-clamp-none transition-all">
                       {fav.text}
                     </p>
@@ -814,12 +1024,17 @@ export default function IdeaNebula() {
               ANONYMOUS SIGNAL
             </div>
             <button 
-              onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id })}
+              onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id, image: selectedNode.image })}
               className={`transition-all ${starAnimation === selectedNode?.content ? 'animate-pulse' : ''}`}
             >
               <Heart className={`w-6 h-6 ${selectedNode && isFav(selectedNode.content) ? 'fill-red-500 text-red-500' : 'text-zinc-500 hover:text-red-500'}`} />
             </button>
           </div>
+          {selectedNode?.image && (
+            <div className="mb-6 overflow-hidden rounded-2xl border border-zinc-800 bg-black p-3">
+              {renderSignalArt(selectedNode.image, 'max-h-56')}
+            </div>
+          )}
           <p className="text-zinc-300 font-mono text-sm leading-relaxed whitespace-pre-wrap border-l-2 border-zinc-800 pl-4">
             {selectedNode?.content}
           </p>
