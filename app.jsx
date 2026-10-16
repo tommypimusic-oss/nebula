@@ -516,37 +516,50 @@ export default function IdeaNebula() {
       return;
     }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      });
-
+    const attachStream = async (stream) => {
       cameraStreamRef.current = stream;
       setCameraError('');
       setIsCameraOpen(true);
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        videoRef.current.playsInline = true;
-        videoRef.current.setAttribute('playsinline', 'true');
-        videoRef.current.setAttribute('webkit-playsinline', 'true');
+      if (!videoRef.current) return;
 
-        try {
-          await videoRef.current.play();
-        } catch (playError) {
-          console.warn('Camera play() was blocked by the browser:', playError);
-          setCameraError('Camera permission is allowed, but the preview is still loading. Please tap the camera again or refresh the page.');
-        }
+      videoRef.current.srcObject = stream;
+      videoRef.current.muted = true;
+      videoRef.current.playsInline = true;
+      videoRef.current.setAttribute('playsinline', 'true');
+      videoRef.current.setAttribute('webkit-playsinline', 'true');
+
+      try {
+        await videoRef.current.play();
+      } catch (playError) {
+        console.warn('Camera play() was blocked by the browser:', playError);
+        setCameraError('Camera permission is allowed, but the preview is still loading. Please tap the camera again or refresh the page.');
       }
-    } catch (error) {
-      console.error(error);
-      setCameraError('Camera access was denied. Please allow the camera and try again.');
+    };
+
+    try {
+      const environmentStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' }
+        },
+        audio: false
+      });
+
+      await attachStream(environmentStream);
+    } catch (environmentError) {
+      console.warn('Environment camera failed, falling back to default camera:', environmentError);
+
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false
+        });
+
+        await attachStream(fallbackStream);
+      } catch (error) {
+        console.error(error);
+        setCameraError('Camera access was denied. Please allow the camera and try again.');
+      }
     }
   };
 
