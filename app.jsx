@@ -5,6 +5,7 @@ import {
   getFirestore, collection, addDoc, onSnapshot, 
   query, orderBy, limit, serverTimestamp 
 } from 'firebase/firestore';
+import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { Plus, Shuffle, Search, X, Star, Heart, Copy, Trash2, Download, Upload, AlertTriangle, Camera, CameraOff } from 'lucide-react';
 
 // 🔴 FIREBASE CONFIG 🔴
@@ -22,8 +23,23 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // --- COLLIDER LOGIC ---
+const uploadAsciiToStorage = async (asciiArt) => {
+  if (!asciiArt || !asciiArt.trim()) return '';
+
+  const safeAscii = asciiArt.trim();
+  const filePath = `ascii-signals/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.txt`;
+  const storageRef = ref(storage, filePath);
+
+  await uploadString(storageRef, safeAscii, 'raw', {
+    contentType: 'text/plain;charset=utf-8'
+  });
+
+  return getDownloadURL(storageRef);
+};
+
 const generateRemix = (texts) => {
   let pool = [];
   texts.forEach(text => {
@@ -516,7 +532,17 @@ export default function IdeaNebula() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+
+        try {
+          await videoRef.current.play();
+        } catch (playError) {
+          console.warn('Camera play() was blocked by the browser:', playError);
+          setCameraError('Camera permission is allowed, but the preview is still loading. Please tap the camera again or refresh the page.');
+        }
       }
     } catch (error) {
       console.error(error);
@@ -606,9 +632,13 @@ export default function IdeaNebula() {
 
     setIsSubmitting(true);
     try {
+      const asciiText = capturedImage.trim();
+      const storageUrl = await uploadAsciiToStorage(asciiText);
+
       await addDoc(collection(db, "ideas"), {
         content: newContent,
-        image: capturedImage,
+        image: storageUrl || asciiText,
+        ascii: asciiText,
         timestamp: serverTimestamp(),
         source: "anonymous"
       });
@@ -632,13 +662,14 @@ export default function IdeaNebula() {
     const selected = shuffled.slice(0, count);
     
     const result = generateRemix(selected.map(i => i.content));
-    const imagePool = selected.filter(item => item.image);
-    const randomImage = imagePool.length
-      ? imagePool[Math.floor(Math.random() * imagePool.length)].image
-      : (ideas.find(item => item.image) || {}).image || '';
+    const artPool = selected.filter(item => item.ascii || item.image);
+    const randomArtItem = artPool.length
+      ? artPool[Math.floor(Math.random() * artPool.length)]
+      : (ideas.find(item => item.ascii || item.image) || {});
+    const randomArt = randomArtItem.ascii || randomArtItem.image || '';
     
     setRemixResult(result);
-    setRemixImage(randomImage);
+    setRemixImage(randomArt);
     setRemixSources(selected.map(i => i.id));
     setShowRemixModal(true);
   };
@@ -646,12 +677,16 @@ export default function IdeaNebula() {
   const renderSignalArt = (value, className = '') => {
     if (!value) return null;
 
-    if (typeof value === 'string' && value.includes('\n') && !value.startsWith('data:image')) {
+    if (typeof value === 'string' && value.includes('\n')) {
       return (
         <pre className={`whitespace-pre text-[6px] sm:text-[7px] leading-[0.7] tracking-[0.02em] text-zinc-100 font-mono bg-black/80 border border-zinc-800 rounded-xl p-3 overflow-auto ${className}`}>
           {value}
         </pre>
       );
+    }
+
+    if (typeof value === 'string' && value.startsWith('http')) {
+      return <img src={value} alt="signal capture" className={`w-full object-cover ${className}`} />;
     }
 
     return <img src={value} alt="signal capture" className={`w-full object-cover ${className}`} />;
@@ -762,7 +797,18 @@ export default function IdeaNebula() {
                 </div>
               ) : isCameraOpen ? (
                 <div className="rounded-2xl overflow-hidden border border-zinc-800 bg-black">
-                  <video ref={videoRef} className="w-full h-56 object-cover bg-black" playsInline autoPlay muted />
+                  <video
+                    ref={videoRef}
+                    className="w-full h-56 object-cover bg-black"
+                    playsInline
+                    autoPlay
+                    muted
+                    onLoadedMetadata={() => {
+                      if (videoRef.current) {
+                        videoRef.current.play().catch(() => {});
+                      }
+                    }}
+                  />
                   <div className="p-3 flex gap-2">
                     <button
                       type="button"
@@ -943,9 +989,9 @@ export default function IdeaNebula() {
                         </button>
                       </div>
                     </div>
-                    {fav.image && (
+                    {(fav.ascii || fav.image) && (
                       <div className="mb-3 overflow-hidden rounded-xl border border-zinc-800 bg-black p-2">
-                        {renderSignalArt(fav.image, 'h-40')}
+                        {renderSignalArt(fav.ascii || fav.image, 'h-40')}
                       </div>
                     )}
                     <p className="text-sm text-zinc-200 font-serif leading-relaxed whitespace-pre-wrap select-text cursor-text line-clamp-3 hover:line-clamp-none transition-all">
@@ -1024,15 +1070,15 @@ export default function IdeaNebula() {
               ANONYMOUS SIGNAL
             </div>
             <button 
-              onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id, image: selectedNode.image })}
+              onClick={() => selectedNode && toggleFavorite(selectedNode.content, 'signal', { nodeId: selectedNode.id, image: selectedNode.ascii || selectedNode.image })}
               className={`transition-all ${starAnimation === selectedNode?.content ? 'animate-pulse' : ''}`}
             >
               <Heart className={`w-6 h-6 ${selectedNode && isFav(selectedNode.content) ? 'fill-red-500 text-red-500' : 'text-zinc-500 hover:text-red-500'}`} />
             </button>
           </div>
-          {selectedNode?.image && (
+          {(selectedNode?.ascii || selectedNode?.image) && (
             <div className="mb-6 overflow-hidden rounded-2xl border border-zinc-800 bg-black p-3">
-              {renderSignalArt(selectedNode.image, 'max-h-56')}
+              {renderSignalArt(selectedNode.ascii || selectedNode.image, 'max-h-56')}
             </div>
           )}
           <p className="text-zinc-300 font-mono text-sm leading-relaxed whitespace-pre-wrap border-l-2 border-zinc-800 pl-4">
