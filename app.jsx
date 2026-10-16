@@ -509,56 +509,75 @@ export default function IdeaNebula() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const dataUrl = e.target.result;
-        const ascii = await createAsciiArt(dataUrl, 30);
-        setCapturedImage(ascii);
-        setCameraError('');
-      } catch (error) {
-        console.error('ASCII conversion failed:', error);
-        setCameraError('This file could not be converted. Please try another image.');
+    try {
+      const ascii = await createAsciiArt(file, 26);
+      setCapturedImage(ascii);
+      setCameraError('');
+    } catch (error) {
+      console.error('ASCII conversion failed:', error);
+      setCameraError('This file could not be converted. Please try another image.');
+    } finally {
+      if (event.target) {
+        event.target.value = '';
       }
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
-  const createAsciiArt = (dataUrl, width = 32) => {
+  const createAsciiArt = (input, width = 26) => {
     const asciiChars = ' .,:;irsXA253hMHGS#9B&@';
 
     return new Promise((resolve, reject) => {
       const img = new Image();
+      const objectUrl = typeof input === 'string' ? input : URL.createObjectURL(input);
+
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const scale = width / img.width;
-        canvas.width = width;
-        canvas.height = Math.max(1, Math.round(img.height * scale));
+        try {
+          const canvas = document.createElement('canvas');
+          const scale = width / img.width;
+          canvas.width = width;
+          canvas.height = Math.max(1, Math.round(img.height * scale));
 
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let ascii = '';
+          const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          let ascii = '';
 
-        for (let y = 0; y < canvas.height; y++) {
-          let line = '';
-          for (let x = 0; x < canvas.width; x++) {
-            const index = (y * canvas.width + x) * 4;
-            const r = data[index];
-            const g = data[index + 1];
-            const b = data[index + 2];
-            const luminance = (r + g + b) / 3;
-            const charIndex = Math.floor((luminance / 255) * (asciiChars.length - 1));
-            line += asciiChars[charIndex];
+          for (let y = 0; y < canvas.height; y++) {
+            let line = '';
+            for (let x = 0; x < canvas.width; x++) {
+              const index = (y * canvas.width + x) * 4;
+              const r = data[index];
+              const g = data[index + 1];
+              const b = data[index + 2];
+              const luminance = (r + g + b) / 3;
+              const charIndex = Math.floor((luminance / 255) * (asciiChars.length - 1));
+              line += asciiChars[charIndex];
+            }
+            ascii += line + '\n';
           }
-          ascii += line + '\n';
-        }
 
-        resolve(ascii.trim());
+          if (typeof input !== 'string') {
+            URL.revokeObjectURL(objectUrl);
+          }
+          resolve(ascii.trim());
+        } catch (error) {
+          if (typeof input !== 'string') {
+            URL.revokeObjectURL(objectUrl);
+          }
+          reject(error);
+        }
       };
-      img.onerror = reject;
-      img.src = dataUrl;
+
+      img.onerror = () => {
+        if (typeof input !== 'string') {
+          URL.revokeObjectURL(objectUrl);
+        }
+        reject(new Error('Image failed to load'));
+      };
+
+      img.src = objectUrl;
     });
   };
 
